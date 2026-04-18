@@ -3,6 +3,7 @@ node_modules/
 # 本地 AI/编辑器配置
 .codex/
 .vscode/
+.idea/
 
 # 本地账号、登录态和浏览器资料
 data/accounts.json
@@ -15,14 +16,27 @@ output/
 dist/
 build/
 ms-playwright/
+tools/
 
 # Python/Node 缓存与本地工具输出
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+.venv/
+venv/
+.python-version
+.coverage
+htmlcov/
 *.spec
 
 # 本地运行日志
 .codex/desktop-dev.stdout.log
 .codex/desktop-dev.stderr.log
+*.log
+
+# 本地环境变量与系统文件
+.env
+.env.*
+Thumbs.db
+Desktop.ini

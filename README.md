@@ -1,6 +1,6 @@
-# 微信反馈截止时间抓取工具
+# 小程序工具
 
-这个项目用于管理微信小游戏后台账号，保存登录态，并抓取“未成年人支付退款”页面中的处理截止时间。当前仓库以 Python 桌面版为主，同时保留了早期的 Node.js 命令行抓取脚本。
+这个项目名为“小程序工具”，用于管理微信小游戏后台账号，保存登录态，并抓取“未成年人支付退款”页面中的处理截止时间。当前仓库以 Python 桌面版为主，同时保留了早期的 Node.js 命令行抓取脚本。
 
 ## 桌面版功能
 
@@ -23,6 +23,22 @@ python -m pip install -r requirements.txt
 
 - 首次启动桌面程序时，如果缺少 Playwright 浏览器资源，程序会自动联网下载安装 Chromium
 - 打包后的安装版默认不再内置 Chromium，以减小包体
+
+## 安装包构建依赖
+
+项目打安装包时只使用项目目录内的便携版 Inno Setup 编译器，不依赖系统安装版。
+
+固定路径：
+
+- `tools/inno/ISCC.exe`
+
+当前仓库已经准备好项目内 Inno Setup 目录；如果后续重新部署环境，请把完整的 Inno Setup 目录内容放到 `tools/inno/`，不要只复制单个 `ISCC.exe`。
+
+### 构建安装包
+
+```powershell
+pwsh ./scripts/build_installer.ps1 -Clean
+```
 
 ## 启动桌面程序
 

@@ -1,7 +1,7 @@
 {
-  "name": "m",
+  "name": "xiaochengxu-gongju",
   "version": "1.0.0",
-  "description": "微信小游戏反馈页面处理截止时间抓取工具",
+  "description": "小程序工具",
   "private": true,
   "scripts": {
     "auth": "tsx src/auth-cli.ts",

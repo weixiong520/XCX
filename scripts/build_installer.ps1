@@ -15,26 +15,26 @@ function Write-Utf8NoBomFile {
     [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
 }
 
+function Resolve-InnoCompilerPath {
+    param(
+        [string]$ProjectRoot
+    )
+
+    $compilerPath = Join-Path $ProjectRoot "tools\inno\ISCC.exe"
+    if (Test-Path $compilerPath) {
+        return $compilerPath
+    }
+
+    throw "未找到项目内 Inno Setup 编译器。请先准备 tools\inno\ISCC.exe。"
+}
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $distRoot = Join-Path $projectRoot "dist"
 $installerSourceRoot = Join-Path $projectRoot "build\installer-source"
 $appName = "小程序工具"
 $installerSourceDir = Join-Path $installerSourceRoot $appName
 $installerExeName = "$appName.exe"
-$innoCompiler = $null
-foreach ($candidate in @(
-    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-    "C:\Program Files\Inno Setup 6\ISCC.exe"
-)) {
-    if (Test-Path $candidate) {
-        $innoCompiler = $candidate
-        break
-    }
-}
-
-if (-not $innoCompiler) {
-    throw "未找到 Inno Setup 编译器，请先安装 Inno Setup 6。"
-}
+$innoCompiler = Resolve-InnoCompilerPath -ProjectRoot $projectRoot
 
 $installerScript = if ($Clean) {
     Join-Path $PSScriptRoot "installer_clean.iss"
