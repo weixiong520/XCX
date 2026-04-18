@@ -1,0 +1,511 @@
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+from desktop_py.core.fetcher import (
+    _fallback_from_responses,
+    _capture_response_payload,
+    _close_context_and_browser,
+    build_feedback_url,
+    fetch_accounts_batch,
+    fetch_switchable_accounts,
+    find_switch_entry,
+    resolve_bootstrap_url,
+    save_login_state,
+    safe_page_content,
+    wait_for_switch_account_items,
+    wait_for_url_contains,
+    wait_for_current_account_name,
+    should_switch_account,
+    should_retry_switch_from_home,
+    should_switch_for_account,
+)
+from desktop_py.core.models import AccountConfig
+
+
+class FakeLocator:
+    def __init__(self, count: int = 0, counts: list[int] | None = None):
+        self._count = count
+        self._counts = list(counts) if counts is not None else None
+        self.first = self
+
+    def count(self) -> int:
+        if self._counts is not None:
+            if len(self._counts) > 1:
+                return self._counts.pop(0)
+            return self._counts[0]
+        return self._count
+
+    def evaluate(self, _script):
+        return None
+
+
+class FakePage:
+    def __init__(self, locator_map=None, text_map=None):
+        self.locator_map = locator_map or {}
+        self.text_map = text_map or {}
+        self.wait_calls: list[int] = []
+        self.load_state_calls: list[tuple[str | None, int | None]] = []
+        self.url = ""
+        self._current_account_names: list[str] = []
+        self._content_results: list[object] = []
+
+    def locator(self, selector, **kwargs):
+        key = (selector, kwargs.get("has_text"))
+        return self.locator_map.get(key, FakeLocator())
+
+    def get_by_text(self, text, exact=False):
+        key = (text, exact)
+        return self.text_map.get(key, FakeLocator())
+
+    def wait_for_timeout(self, timeout):
+        self.wait_calls.append(timeout)
+
+    def wait_for_load_state(self, state=None, timeout=None):
+        self.load_state_calls.append((state, timeout))
+        return None
+
+    def set_current_account_names(self, names: list[str]):
+        self._current_account_names = list(names)
+
+    def set_content_results(self, results: list[object]):
+        self._content_results = list(results)
+
+    def content(self):
+        if self._content_results:
+            result = self._content_results.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
+        return ""
+
+
+class FakeResponse:
+    def __init__(self, text: str, content_type: str = "application/json", url: str = "https://example.com/api", status: int = 200):
+        self._text = text
+        self.headers = {"content-type": content_type}
+        self.url = url
+        self.status = status
+
+    def text(self):
+        return self._text
+
+
+class FetcherTestCase(unittest.TestCase):
+    def test_build_feedback_url(self):
+        url = build_feedback_url("https://mp.weixin.qq.com/wxamp/index/index?lang=zh_CN&token=2056634783")
+        self.assertIn("plugin_uin=1010", url)
+        self.assertIn("selected=2", url)
+        self.assertIn("token=2056634783", url)
+
+    def test_find_switch_entry_prefers_title_selector(self):
+        title_locator = FakeLocator(count=1)
+        fallback_locator = FakeLocator(count=1)
+        page = FakePage(
+            locator_map={
+                ("div.menu_box_account_info_item[title='切换账号']", None): title_locator,
+                (".menu_box_account_info_item", "切换账号"): fallback_locator,
+            }
+        )
+
+        result = find_switch_entry(page)
+
+        self.assertIs(result, title_locator)
+
+    def test_find_switch_entry_falls_back_to_text_locator(self):
+        text_locator = FakeLocator(count=1)
+        page = FakePage(
+            locator_map={
+                ("div.menu_box_account_info_item[title='切换账号']", None): FakeLocator(),
+                (".menu_box_account_info_item", "切换账号"): FakeLocator(),
+                ("[title='切换账号']", None): FakeLocator(),
+            },
+            text_map={
+                ("切换账号", True): text_locator,
+            },
+        )
+
+        result = find_switch_entry(page)
+
+        self.assertIs(result, text_locator)
+
+    def test_find_switch_entry_returns_none_when_missing(self):
+        page = FakePage()
+
+        result = find_switch_entry(page)
+
+        self.assertIsNone(result)
+
+    def test_should_switch_account(self):
+        self.assertFalse(should_switch_account("七色花消消乐", "七色花消消乐"))
+        self.assertTrue(should_switch_account("主账号", "七色花消消乐"))
+        self.assertTrue(should_switch_account("", "七色花消消乐"))
+
+    def test_should_switch_for_entry_account(self):
+        account = AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True)
+
+        self.assertFalse(should_switch_for_account(account, ""))
+        self.assertFalse(should_switch_for_account(account, "七色花消消乐"))
+
+    def test_should_switch_for_imported_account(self):
+        account = AccountConfig(name="七色花消消乐", state_path="storage/shared.json", is_entry_account=False)
+
+        self.assertFalse(should_switch_for_account(account, "七色花消消乐"))
+        self.assertTrue(should_switch_for_account(account, "不灭轮回"))
+        self.assertTrue(should_switch_for_account(account, ""))
+
+    def test_should_retry_switch_from_home(self):
+        self.assertTrue(
+            should_retry_switch_from_home(
+                "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&token=1",
+                "https://mp.weixin.qq.com/",
+                False,
+            )
+        )
+
+    def test_resolve_bootstrap_url_uses_home_url_when_feedback_url_exists(self):
+        account = AccountConfig(
+            name="导入账号",
+            state_path="storage/shared.json",
+            is_entry_account=False,
+            feedback_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&token=old",
+            home_url="https://mp.weixin.qq.com/",
+        )
+
+        self.assertEqual(resolve_bootstrap_url(account, Path("output/demo")), "https://mp.weixin.qq.com/")
+
+    def test_resolve_bootstrap_url_ignores_stale_result_page_url(self):
+        account = AccountConfig(
+            name="导入账号",
+            state_path="storage/shared.json",
+            is_entry_account=False,
+            home_url="https://mp.weixin.qq.com/",
+        )
+        with TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            (output_dir / "result.json").write_text(
+                '{"page_url": "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&token=old"}',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(resolve_bootstrap_url(account, output_dir), "https://mp.weixin.qq.com/")
+        self.assertFalse(
+            should_retry_switch_from_home(
+                "https://mp.weixin.qq.com/",
+                "https://mp.weixin.qq.com/",
+                False,
+            )
+        )
+        self.assertFalse(
+            should_retry_switch_from_home(
+                "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&token=1",
+                "https://mp.weixin.qq.com/",
+                True,
+            )
+        )
+
+    def test_wait_for_switch_account_items_retries_until_success(self):
+        account_locator = FakeLocator(counts=[0, 0, 0, 0, 0, 0, 0, 0, 0, 2])
+        close_locator = FakeLocator(count=1)
+        page = FakePage(
+            locator_map={
+                (".switch_account_dialog .account_item", None): account_locator,
+                (".switch_account_dialog .close_icon", None): close_locator,
+                ("div.menu_box_account_info_item[title='切换账号']", None): FakeLocator(count=1),
+            }
+        )
+        logs: list[str] = []
+
+        with patch("desktop_py.core.fetcher.open_switch_account_dialog"):
+            result = wait_for_switch_account_items(page, ".switch_account_dialog .account_item", logs.append)
+
+        self.assertIs(result, account_locator)
+        self.assertGreaterEqual(len(page.wait_calls), 8)
+        self.assertEqual(logs, [])
+
+    def test_wait_for_switch_account_items_raises_after_three_attempts(self):
+        page = FakePage(
+            locator_map={
+                (".switch_account_dialog .account_item", None): FakeLocator(counts=[0] * 40),
+                (".switch_account_dialog .close_icon", None): FakeLocator(count=1),
+                ("div.menu_box_account_info_item[title='切换账号']", None): FakeLocator(count=1),
+            }
+        )
+
+        with patch("desktop_py.core.fetcher.open_switch_account_dialog"):
+            with self.assertRaisesRegex(Exception, "未读取到切换账号列表，已重试 3 次。"):
+                wait_for_switch_account_items(page, ".switch_account_dialog .account_item")
+
+    def test_wait_for_switch_account_items_waits_before_first_retry_log(self):
+        account_locator = FakeLocator(counts=[0, 0, 0, 0, 0, 0, 0, 0, 1])
+        page = FakePage(
+            locator_map={
+                (".switch_account_dialog .account_item", None): account_locator,
+                (".switch_account_dialog .close_icon", None): FakeLocator(count=1),
+                ("div.menu_box_account_info_item[title='切换账号']", None): FakeLocator(count=1),
+            }
+        )
+        logs: list[str] = []
+
+        with patch("desktop_py.core.fetcher.open_switch_account_dialog"):
+            result = wait_for_switch_account_items(page, ".switch_account_dialog .account_item", logs.append)
+
+        self.assertIs(result, account_locator)
+        self.assertEqual(logs, [])
+        self.assertGreaterEqual(len(page.wait_calls), 8)
+
+    def test_wait_for_url_contains_returns_when_keyword_appears(self):
+        page = FakePage()
+        urls = ["https://mp.weixin.qq.com/", "https://mp.weixin.qq.com/wxamp/index/index?token=1"]
+
+        def fake_wait(_timeout):
+            page.wait_calls.append(_timeout)
+            if len(urls) > 1:
+                page.url = urls.pop(1)
+
+        page.url = urls[0]
+        page.wait_for_timeout = fake_wait
+
+        self.assertTrue(wait_for_url_contains(page, ("token=",)))
+
+    def test_wait_for_current_account_name_returns_expected_name(self):
+        page = FakePage()
+        names = ["", "目标账号"]
+
+        with patch("desktop_py.core.fetcher.extract_current_account_name", side_effect=lambda _page: names.pop(0) if len(names) > 1 else names[0]):
+            actual_name = wait_for_current_account_name(page, "目标账号", timeout_ms=1000)
+
+        self.assertEqual(actual_name, "目标账号")
+
+    def test_safe_page_content_retries_until_success(self):
+        page = FakePage()
+        page.set_content_results([RuntimeError("navigating"), "<html>ok</html>"])
+
+        content = safe_page_content(page, timeout_ms=1000)
+
+        self.assertEqual(content, "<html>ok</html>")
+        self.assertGreaterEqual(len(page.wait_calls), 1)
+
+    def test_safe_page_content_waits_for_navigation_to_settle(self):
+        page = FakePage()
+        page.set_content_results(
+            [
+                RuntimeError("Page.content: Unable to retrieve content because the page is navigating and changing the content."),
+                "<html>ok</html>",
+            ]
+        )
+
+        content = safe_page_content(page, timeout_ms=1500)
+
+        self.assertEqual(content, "<html>ok</html>")
+        self.assertIn(("domcontentloaded", 1000), page.load_state_calls)
+        self.assertIn(("networkidle", 1000), page.load_state_calls)
+
+    def test_fallback_from_responses_prefers_appeal_deadline_time(self):
+        deadline = _fallback_from_responses(
+            [
+                {
+                    "data": {
+                        "user_refund_check_list": [
+                            {
+                                "ctrl_info": {
+                                    "deadline_time": "1776147849",
+                                    "appeal_deadline_time": "1776737974",
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        )
+
+        self.assertEqual(deadline, "2026-04-21 10:19:34")
+
+    def test_capture_response_payload_keeps_json_body_for_fallback(self):
+        response = FakeResponse('{"data":{"user_refund_check_list":[{"ctrl_info":{"appeal_deadline_time":"1776737974"}}]}}')
+
+        payload = _capture_response_payload(response)
+
+        self.assertEqual(payload["body"]["data"]["user_refund_check_list"][0]["ctrl_info"]["appeal_deadline_time"], "1776737974")
+
+    def test_fetch_accounts_batch_groups_accounts_by_state_path(self):
+        accounts = [
+            AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False),
+            AccountConfig(name="账号B", state_path="storage/a.json", is_entry_account=False),
+            AccountConfig(name="账号C", state_path="storage/b.json", is_entry_account=False),
+        ]
+        progress_calls: list[str] = []
+        contexts = []
+
+        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
+            "desktop_py.core.fetcher.create_browser_context"
+        ) as mock_create_context, patch(
+            "desktop_py.core.fetcher._fetch_account_in_page",
+            side_effect=lambda page, context, account, logger, profile_dir: type(
+                "Result", (), {"account_name": account.name}
+            )(),
+        ), patch("desktop_py.core.fetcher.Path.exists", return_value=True):
+            mock_playwright.return_value.__enter__.return_value = object()
+            for _ in range(2):
+                fake_context = type("FakeContext", (), {"new_page": lambda self: object(), "close": lambda self: None})()
+                fake_browser = type("FakeBrowser", (), {"close": lambda self: None})()
+                contexts.append((fake_browser, fake_context))
+            mock_create_context.side_effect = contexts
+
+            results = fetch_accounts_batch(accounts, progress=lambda result: progress_calls.append(result.account_name))
+
+        self.assertEqual([result.account_name for result in results], ["账号A", "账号B", "账号C"])
+        self.assertEqual(progress_calls, ["账号A", "账号B", "账号C"])
+        self.assertEqual(mock_create_context.call_count, 2)
+
+    def test_fetch_accounts_batch_creates_and_closes_page_per_account(self):
+        accounts = [
+            AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False),
+            AccountConfig(name="账号B", state_path="storage/a.json", is_entry_account=False),
+        ]
+        created_pages = []
+
+        class FakePageObject:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        class FakeContext:
+            def new_page(self):
+                page = FakePageObject()
+                created_pages.append(page)
+                return page
+
+            def close(self):
+                return None
+
+        fake_context = FakeContext()
+        fake_browser = type("FakeBrowser", (), {"close": lambda self: None})()
+
+        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
+            "desktop_py.core.fetcher.create_browser_context", return_value=(fake_browser, fake_context)
+        ), patch(
+            "desktop_py.core.fetcher._fetch_account_in_page",
+            side_effect=lambda page, context, account, logger, profile_dir: type(
+                "Result", (), {"account_name": account.name}
+            )(),
+        ), patch("desktop_py.core.fetcher.Path.exists", return_value=True):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            results = fetch_accounts_batch(accounts)
+
+        self.assertEqual([result.account_name for result in results], ["账号A", "账号B"])
+        self.assertEqual(len(created_pages), 2)
+        self.assertTrue(all(page.closed for page in created_pages))
+
+    def test_close_context_and_browser_still_closes_browser_when_context_close_fails(self):
+        calls: list[str] = []
+
+        class FakeContext:
+            def close(self):
+                calls.append("context")
+                raise RuntimeError("context close failed")
+
+        class FakeBrowser:
+            def close(self):
+                calls.append("browser")
+
+        with self.assertRaisesRegex(RuntimeError, "context close failed"):
+            _close_context_and_browser(FakeContext(), FakeBrowser())
+
+        self.assertEqual(calls, ["context", "browser"])
+
+    def test_save_login_state_still_closes_browser_when_context_close_fails(self):
+        calls: list[str] = []
+
+        class FakePageForLogin:
+            def __init__(self):
+                self.url = "https://mp.weixin.qq.com/wxamp/index/index?token=1"
+
+            def goto(self, _url, wait_until=None):
+                return None
+
+            def wait_for_timeout(self, _timeout):
+                return None
+
+            def close(self):
+                calls.append("page")
+
+        class FakeContextForLogin:
+            def __init__(self):
+                self.page = FakePageForLogin()
+
+            def new_page(self):
+                return self.page
+
+            def storage_state(self, path=None, indexed_db=False):
+                return None
+
+            def close(self):
+                calls.append("context")
+                raise RuntimeError("context close failed")
+
+        class FakeBrowserForLogin:
+            def __init__(self):
+                self.context = FakeContextForLogin()
+
+            def new_context(self, viewport=None):
+                return self.context
+
+            def close(self):
+                calls.append("browser")
+
+        fake_browser = FakeBrowserForLogin()
+        fake_playwright = type(
+            "FakePlaywright", (), {"chromium": type("FakeChromium", (), {"launch": lambda self, headless=False: fake_browser})()}
+        )()
+
+        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright:
+            mock_playwright.return_value.__enter__.return_value = fake_playwright
+            with self.assertRaisesRegex(RuntimeError, "context close failed"):
+                save_login_state(AccountConfig(name="账号A", state_path="storage/a.json"), 1)
+
+        self.assertEqual(calls, ["page", "context", "browser"])
+
+    def test_fetch_switchable_accounts_still_closes_browser_when_context_close_fails(self):
+        calls: list[str] = []
+
+        class FakePageForSwitch:
+            def goto(self, _url, wait_until=None, timeout=None):
+                return None
+
+            def close(self):
+                calls.append("page")
+
+        class FakeContextForSwitch:
+            def __init__(self):
+                self.page = FakePageForSwitch()
+
+            def new_page(self):
+                return self.page
+
+            def close(self):
+                calls.append("context")
+                raise RuntimeError("context close failed")
+
+        class FakeBrowserForSwitch:
+            def close(self):
+                calls.append("browser")
+
+        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
+            "desktop_py.core.fetcher.create_browser_context",
+            return_value=(FakeBrowserForSwitch(), FakeContextForSwitch()),
+        ), patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=True), patch(
+            "desktop_py.core.fetcher.list_switchable_accounts", return_value=["账号A", "账号B"]
+        ), patch("desktop_py.core.fetcher.Path.exists", return_value=True):
+            mock_playwright.return_value.__enter__.return_value = object()
+            with self.assertRaisesRegex(RuntimeError, "context close failed"):
+                fetch_switchable_accounts(AccountConfig(name="主账号", state_path="storage/shared.json"), profile_dir="")
+
+        self.assertEqual(calls, ["page", "context", "browser"])
+
+if __name__ == "__main__":
+    unittest.main()

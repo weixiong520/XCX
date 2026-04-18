@@ -1,0 +1,28 @@
+node_modules/
+
+# 本地 AI/编辑器配置
+.codex/
+.vscode/
+
+# 本地账号、登录态和浏览器资料
+data/accounts.json
+data/settings.json
+storage/
+browser_profile/
+
+# 抓取输出与构建产物
+output/
+dist/
+build/
+ms-playwright/
+
+# Python/Node 缓存与本地工具输出
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.spec
+
+# 本地运行日志
+.codex/desktop-dev.stdout.log
+.codex/desktop-dev.stderr.log

@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+from dataclasses import fields
+from pathlib import Path
+
+from desktop_py.core.models import AccountConfig, AppSettings, FetchResult
+
+
+APP_NAME = "小程序工具"
+BROWSER_PROFILE_LOCK_FILES = (
+    "SingletonLock",
+    "SingletonCookie",
+    "SingletonSocket",
+    "LOCK",
+    "lockfile",
+)
+
+
+def runtime_root() -> Path:
+    if getattr(sys, "frozen", False):
+        executable_dir = Path(sys.executable).resolve().parent
+        if os.access(executable_dir, os.W_OK):
+            return executable_dir
+        local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_appdata:
+            return Path(local_appdata).expanduser() / APP_NAME
+        return executable_dir
+    return Path(__file__).resolve().parents[2]
+
+
+PROJECT_ROOT = runtime_root()
+DATA_DIR = PROJECT_ROOT / "data"
+STORAGE_DIR = PROJECT_ROOT / "storage"
+PY_OUTPUT_DIR = PROJECT_ROOT / "output" / "desktop_py"
+ACCOUNTS_FILE = DATA_DIR / "accounts.json"
+SETTINGS_FILE = DATA_DIR / "settings.json"
+
+
+def read_json_file(path: Path) -> object:
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def validate_shared_browser_profile_dir(profile_dir: str) -> str:
+    value = profile_dir.strip()
+    if not value:
+        return ""
+
+    path = Path(value).expanduser()
+    if not path.exists():
+        raise ValueError("共享浏览器资料目录不存在，请选择已存在的目录。")
+    if not path.is_dir():
+        raise ValueError("共享浏览器资料目录必须是文件夹。")
+
+    resolved = path.resolve()
+    if _looks_like_default_browser_profile_dir(resolved):
+        raise ValueError("共享浏览器资料目录不能直接指向 Chrome 或 Edge 的默认用户资料目录，请改用专用自动化目录。")
+    if _has_browser_lock_markers(resolved):
+        raise ValueError("共享浏览器资料目录当前疑似正被浏览器占用，请先关闭相关浏览器后再使用。")
+    return str(resolved)
+
+
+def _looks_like_default_browser_profile_dir(path: Path) -> bool:
+    name = path.name.lower()
+    parent_name = path.parent.name.lower()
+    if name == "user data" and (path / "Local State").exists():
+        return True
+    if parent_name == "user data" and (path / "Preferences").exists():
+        return True
+    return False
+
+
+def _has_browser_lock_markers(path: Path) -> bool:
+    if any((path / lock_name).exists() for lock_name in BROWSER_PROFILE_LOCK_FILES):
+        return True
+    parent = path.parent
+    if parent.name.lower() == "user data":
+        return any((parent / lock_name).exists() for lock_name in BROWSER_PROFILE_LOCK_FILES)
+    return False
+
+
+def ensure_runtime_dirs() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    PY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    if not ACCOUNTS_FILE.exists():
+        ACCOUNTS_FILE.write_text("[]\n", encoding="utf-8")
+    if not SETTINGS_FILE.exists():
+        SETTINGS_FILE.write_text(json.dumps(AppSettings().to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def load_accounts() -> list[AccountConfig]:
+    ensure_runtime_dirs()
+    data = read_json_file(ACCOUNTS_FILE)
+    return [AccountConfig(**item) for item in data]
+
+
+def save_accounts(accounts: list[AccountConfig]) -> None:
+    ensure_runtime_dirs()
+    ACCOUNTS_FILE.write_text(
+        json.dumps([account.to_dict() for account in accounts], ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8"
+    )
+
+
+def load_settings() -> AppSettings:
+    ensure_runtime_dirs()
+    raw = read_json_file(SETTINGS_FILE)
+    allowed = {item.name for item in fields(AppSettings)}
+    filtered = {key: value for key, value in raw.items() if key in allowed}
+    settings = AppSettings(**filtered)
+    settings.login_wait_seconds = 120
+    return settings
+
+
+def save_settings(settings: AppSettings) -> None:
+    ensure_runtime_dirs()
+    SETTINGS_FILE.write_text(json.dumps(settings.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def account_state_path(name: str) -> str:
+    safe_name = "".join(char if char.isalnum() else "_" for char in name).strip("_") or "account"
+    return str(STORAGE_DIR / f"{safe_name}.json")
+
+
+def default_state_path(accounts: list[AccountConfig]) -> str:
+    for account in accounts:
+        if account.state_path:
+            return account.state_path
+    return str(STORAGE_DIR / "shared_accounts.json")
+
+
+def account_output_dir(account_name: str) -> Path:
+    safe_name = "".join(char if char.isalnum() else "_" for char in account_name).strip("_") or "account"
+    target = PY_OUTPUT_DIR / safe_name
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def write_fetch_result(account_name: str, result: FetchResult, extra: dict | None = None) -> None:
+    target = account_output_dir(account_name)
+    payload = result.to_dict()
+    if extra:
+        payload["extra"] = extra
+    (target / "result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
