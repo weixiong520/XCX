@@ -1106,18 +1106,14 @@ class MainWindow(QMainWindow):
             self._show_info("提示", "主账号不参与抓取，请选择导入账号。")
             return
 
-        def job(log) -> FetchResult:
-            self._ensure_login_alive_for_fetch(log, [account])
-            return fetch_account(
+        self._run_thread(
+            lambda log: fetch_account(
                 account,
                 0,
                 self.settings.headless_fetch,
                 log,
                 self.settings.browser_profile_dir,
-            )
-
-        self._run_thread(
-            job,
+            ),
             on_success=lambda result: self._mark_fetch_result(account, result),
         )
 
@@ -1223,7 +1219,6 @@ class MainWindow(QMainWindow):
 
     def _build_fetch_job(self, enabled_accounts: list[AccountConfig]):
         def job(log, progress) -> list[FetchResult]:
-            self._ensure_login_alive_for_fetch(log, enabled_accounts)
             return fetch_accounts_batch(
                 enabled_accounts,
                 headless=self.settings.headless_fetch,
@@ -1233,14 +1228,6 @@ class MainWindow(QMainWindow):
             )
 
         return job
-
-    def _ensure_login_alive_for_fetch(self, logger, candidates: list[AccountConfig]) -> None:
-        account = self._account_for_keep_alive(candidates)
-        if account is None:
-            return
-        if keep_alive_account_state(account, logger, self.settings.browser_profile_dir):
-            return
-        raise RuntimeError("登录态已失效，请重新保存登录态后再抓取。")
 
     def _mark_fetch_progress(self, result: FetchResult) -> None:
         account = next((item for item in self.accounts if item.name == result.account_name), None)

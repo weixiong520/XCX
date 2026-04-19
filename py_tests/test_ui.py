@@ -445,41 +445,16 @@ class UiSmokeTestCase(unittest.TestCase):
     def test_build_fetch_job_uses_batch_fetcher(self):
         window = MainWindow()
         self.addCleanup(window.close)
-        window.accounts = [
-            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
-        ]
         accounts = [
             AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True),
         ]
         job = window._build_fetch_job(accounts)
 
-        with patch("desktop_py.ui.main_window.keep_alive_account_state", return_value=True) as mock_keep_alive, patch(
-            "desktop_py.ui.main_window.fetch_accounts_batch", return_value=[]
-        ) as mock_batch:
+        with patch("desktop_py.ui.main_window.fetch_accounts_batch", return_value=[]) as mock_batch:
             result = job(lambda _message: None, lambda _payload: None)
 
         self.assertEqual(result, [])
-        mock_keep_alive.assert_called_once()
         mock_batch.assert_called_once()
-
-    def test_build_fetch_job_stops_when_keep_alive_fails(self):
-        window = MainWindow()
-        self.addCleanup(window.close)
-        window.accounts = [
-            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
-        ]
-        accounts = [
-            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True),
-        ]
-        job = window._build_fetch_job(accounts)
-
-        with patch("desktop_py.ui.main_window.keep_alive_account_state", return_value=False), patch(
-            "desktop_py.ui.main_window.fetch_accounts_batch"
-        ) as mock_batch:
-            with self.assertRaisesRegex(RuntimeError, "登录态已失效"):
-                job(lambda _message: None, lambda _payload: None)
-
-        mock_batch.assert_not_called()
 
     def test_actions_include_single_run_fetch_and_push_button(self):
         window = MainWindow()
