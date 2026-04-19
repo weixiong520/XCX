@@ -110,9 +110,7 @@ def load_settings() -> AppSettings:
     raw = read_json_file(SETTINGS_FILE)
     allowed = {item.name for item in fields(AppSettings)}
     filtered = {key: value for key, value in raw.items() if key in allowed}
-    settings = AppSettings(**filtered)
-    settings.login_wait_seconds = 120
-    return settings
+    return AppSettings(**filtered)
 
 
 def save_settings(settings: AppSettings) -> None:

@@ -44,6 +44,16 @@ class StoreTestCase(unittest.TestCase):
 
         self.assertEqual(settings.feishu_webhook, "demo")
 
+    def test_load_settings_keeps_persisted_login_wait_seconds(self):
+        with TemporaryDirectory() as temp_dir:
+            settings_path = Path(temp_dir) / "settings.json"
+            settings_path.write_text('{"login_wait_seconds":45}\n', encoding="utf-8")
+
+            with patch("desktop_py.core.store.SETTINGS_FILE", settings_path), patch("desktop_py.core.store.ensure_runtime_dirs"):
+                settings = load_settings()
+
+        self.assertEqual(settings.login_wait_seconds, 45)
+
     def test_load_accounts_supports_utf8_bom(self):
         with TemporaryDirectory() as temp_dir:
             accounts_path = Path(temp_dir) / "accounts.json"

@@ -7,6 +7,7 @@ from desktop_py.core.fetcher import (
     _fallback_from_responses,
     _capture_response_payload,
     _close_context_and_browser,
+    CancelledError,
     build_feedback_url,
     business_iframe_selector,
     fetch_accounts_batch,
@@ -18,6 +19,7 @@ from desktop_py.core.fetcher import (
     safe_page_content,
     wait_for_iframe_ready,
     wait_for_switch_account_items,
+    wait_or_cancel,
     wait_for_url_contains,
     wait_for_current_account_name,
     should_switch_account,
@@ -321,6 +323,12 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertEqual(actual_name, "目标账号")
 
+    def test_wait_or_cancel_raises_when_cancelled(self):
+        page = FakePage()
+
+        with self.assertRaisesRegex(CancelledError, "任务已取消"):
+            wait_or_cancel(page, 200, lambda: True)
+
     def test_business_iframe_selector_prefers_js_iframe(self):
         page = FakePage(
             locator_map={
@@ -573,6 +581,63 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertEqual(calls, ["page", "context", "browser"])
 
+    def test_save_login_state_fails_without_overwriting_existing_state_when_login_not_completed(self):
+        calls: list[str] = []
+
+        class FakePageForLogin:
+            def __init__(self):
+                self.url = "https://mp.weixin.qq.com/"
+
+            def goto(self, _url, wait_until=None):
+                return None
+
+            def wait_for_timeout(self, _timeout):
+                return None
+
+            def close(self):
+                calls.append("page")
+
+        class FakeContextForLogin:
+            def __init__(self):
+                self.page = FakePageForLogin()
+
+            def new_page(self):
+                return self.page
+
+            def storage_state(self, path=None, indexed_db=False):
+                calls.append(f"storage:{path}:{indexed_db}")
+
+            def close(self):
+                calls.append("context")
+
+        class FakeBrowserForLogin:
+            def __init__(self):
+                self.context = FakeContextForLogin()
+
+            def new_context(self, viewport=None):
+                return self.context
+
+            def close(self):
+                calls.append("browser")
+
+        fake_browser = FakeBrowserForLogin()
+        fake_playwright = type(
+            "FakePlaywright", (), {"chromium": type("FakeChromium", (), {"launch": lambda self, headless=False: fake_browser})()}
+        )()
+
+        timestamps = iter([100.0, 101.0])
+        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
+            "desktop_py.core.fetcher.datetime"
+        ) as mock_datetime:
+            mock_playwright.return_value.__enter__.return_value = fake_playwright
+            mock_datetime.now.return_value.timestamp.side_effect = lambda: next(timestamps)
+
+            with self.assertRaisesRegex(Exception, "未在限定时间内检测到登录成功"):
+                save_login_state(AccountConfig(name="账号A", state_path="storage/a.json"), 1)
+
+        self.assertEqual(calls, ["page", "context", "browser"])
+        self.assertFalse(any(call.startswith("storage:") for call in calls))
+
     def test_fetch_switchable_accounts_still_closes_browser_when_context_close_fails(self):
         calls: list[str] = []
 
@@ -666,6 +731,51 @@ class FetcherTestCase(unittest.TestCase):
         mock_validate.assert_called_once()
         self.assertIn("开始静默保活账号 主账号。", logs)
         self.assertIn("账号 主账号 静默保活成功。", logs)
+
+    def test_fetch_accounts_batch_stops_gracefully_when_cancelled(self):
+        accounts = [
+            AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False),
+            AccountConfig(name="账号B", state_path="storage/a.json", is_entry_account=False),
+        ]
+        progress_calls: list[str] = []
+
+        class FakePageObject:
+            def close(self):
+                return None
+
+        class FakeContext:
+            def new_page(self):
+                return FakePageObject()
+
+            def close(self):
+                return None
+
+        fake_context = FakeContext()
+        fake_browser = type("FakeBrowser", (), {"close": lambda self: None})()
+        results = [
+            type("Result", (), {"account_name": "账号A"})(),
+            CancelledError("任务已取消"),
+        ]
+
+        def fake_fetch(page, context, account, logger, profile_dir, is_cancelled=None):
+            result = results.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
+            "desktop_py.core.fetcher.create_browser_context", return_value=(fake_browser, fake_context)
+        ), patch("desktop_py.core.fetcher._fetch_account_in_page", side_effect=fake_fetch), patch(
+            "desktop_py.core.fetcher.Path.exists", return_value=True
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+            batch_results = fetch_accounts_batch(
+                accounts,
+                progress=lambda result: progress_calls.append(result.account_name),
+            )
+
+        self.assertEqual([result.account_name for result in batch_results], ["账号A"])
+        self.assertEqual(progress_calls, ["账号A"])
 
 if __name__ == "__main__":
     unittest.main()

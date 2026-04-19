@@ -19,7 +19,9 @@ class TaskThread(QThread):
     def run(self) -> None:
         try:
             parameter_count = len(inspect.signature(self._job_builder).parameters)
-            if parameter_count >= 2:
+            if parameter_count >= 3:
+                result = self._job_builder(self.message.emit, self.progress.emit, self.isInterruptionRequested)
+            elif parameter_count >= 2:
                 result = self._job_builder(self.message.emit, self.progress.emit)
             else:
                 result = self._job_builder(self.message.emit)

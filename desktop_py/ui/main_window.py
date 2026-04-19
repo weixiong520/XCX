@@ -77,6 +77,7 @@ BLOCKED_ACCOUNT_NAMES = {
 }
 
 KEEP_ALIVE_INTERVAL_MS = 5 * 60 * 60 * 1000
+ACTUAL_ACCOUNT_PREFIX = "当前实际账号："
 
 
 class HoverTableWidget(QTableWidget):
@@ -838,13 +839,13 @@ class MainWindow(QMainWindow):
         running_threads = list(self._threads)
         for thread in running_threads:
             try:
-                thread.terminate()
+                thread.requestInterruption()
                 thread.wait(2000)
             except Exception:
                 continue
         self._threads.clear()
         self._update_action_buttons()
-        self.append_log("已强制停止当前后台抓取任务。")
+        self.append_log("已请求停止当前后台抓取任务。")
         self.statusBar().showMessage("已停止后台任务", 4000)
         self._set_status_text("后台任务已停止")
 
@@ -1033,10 +1034,10 @@ class MainWindow(QMainWindow):
         self.append_log(self._login_start_message(account))
         self.statusBar().showMessage("已打开浏览器，请完成扫码登录。", 8000)
         self._run_thread(
-            lambda log: (
-                save_login_state_with_profile(account, self.settings.login_wait_seconds, self.settings.browser_profile_dir, log)
+            lambda log, _progress=None, is_cancelled=None: (
+                save_login_state_with_profile(account, self.settings.login_wait_seconds, self.settings.browser_profile_dir, log, is_cancelled)
                 if self.settings.browser_profile_dir.strip()
-                else save_login_state(account, self.settings.login_wait_seconds, log)
+                else save_login_state(account, self.settings.login_wait_seconds, log, is_cancelled)
             ),
             on_success=lambda _: self._mark_login(account),
         )
@@ -1090,12 +1091,13 @@ class MainWindow(QMainWindow):
             return
 
         self._run_thread(
-            lambda log: fetch_account(
+            lambda log, _progress=None, is_cancelled=None: fetch_account(
                 account,
                 0,
                 self.settings.headless_fetch,
                 log,
                 self.settings.browser_profile_dir,
+                is_cancelled,
             ),
             on_success=lambda result: self._mark_fetch_result(account, result),
         )
@@ -1197,13 +1199,14 @@ class MainWindow(QMainWindow):
         )
 
     def _build_fetch_job(self, enabled_accounts: list[AccountConfig]):
-        def job(log, progress) -> list[FetchResult]:
+        def job(log, progress, is_cancelled=None) -> list[FetchResult]:
             return fetch_accounts_batch(
                 enabled_accounts,
                 headless=self.settings.headless_fetch,
                 logger=log,
                 progress=progress,
                 profile_dir=self.settings.browser_profile_dir,
+                is_cancelled=is_cancelled,
             )
 
         return job
@@ -1243,6 +1246,7 @@ class MainWindow(QMainWindow):
             FetchResult(
                 account_name=account.name,
                 ok=account.last_status == "抓取成功",
+                actual_account_name=self._actual_account_name_from_note(account.last_note),
                 deadline_text=account.last_deadline,
                 note=account.last_note,
                 page_url=account.home_url,
@@ -1253,6 +1257,13 @@ class MainWindow(QMainWindow):
             lambda _log: send_feishu_text(webhook, build_summary(results)),
             on_success=lambda _: self.append_log("飞书汇总已发送。")
         )
+
+    def _actual_account_name_from_note(self, note: str) -> str:
+        for part in note.split("；"):
+            text = part.strip()
+            if text.startswith(ACTUAL_ACCOUNT_PREFIX):
+                return text.removeprefix(ACTUAL_ACCOUNT_PREFIX).strip()
+        return ""
 
     def _run_thread(self, job_builder, on_success, emit_log: bool = True, emit_failure_log: bool = True, update_status: bool = True, on_progress=None) -> None:
         self._task_runner.run(

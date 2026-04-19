@@ -22,6 +22,10 @@ class FetchError(RuntimeError):
     """抓取失败。"""
 
 
+class CancelledError(RuntimeError):
+    """后台任务已取消。"""
+
+
 SWITCH_ACCOUNT_LIST_RETRY_LIMIT = 3
 BUSINESS_IFRAME_SELECTORS = (
     "#js_iframe",
@@ -77,24 +81,34 @@ def _maybe_expand_account_menu(page: Page) -> None:
                 continue
 
 
-def wait_for_url_contains(page: Page, keywords: tuple[str, ...], timeout_ms: int = 5000) -> bool:
+def wait_for_url_contains(
+    page: Page,
+    keywords: tuple[str, ...],
+    timeout_ms: int = 5000,
+    is_cancelled: callable | None = None,
+) -> bool:
     deadline = time.monotonic() + (timeout_ms / 1000)
     while time.monotonic() < deadline:
         current_url = page.url
         if any(keyword in current_url for keyword in keywords):
             return True
-        page.wait_for_timeout(200)
+        wait_or_cancel(page, 200, is_cancelled)
     return any(keyword in page.url for keyword in keywords)
 
 
-def wait_for_current_account_name(page: Page, expected_name: str, timeout_ms: int = 5000) -> str:
+def wait_for_current_account_name(
+    page: Page,
+    expected_name: str,
+    timeout_ms: int = 5000,
+    is_cancelled: callable | None = None,
+) -> str:
     deadline = time.monotonic() + (timeout_ms / 1000)
     while time.monotonic() < deadline:
         actual_name = extract_current_account_name(page)
         if actual_name:
             if actual_name == expected_name:
                 return actual_name
-        page.wait_for_timeout(250)
+        wait_or_cancel(page, 250, is_cancelled)
     return extract_current_account_name(page)
 
 
@@ -108,12 +122,12 @@ def business_iframe_selector(page: Page) -> str:
     return ""
 
 
-def wait_for_iframe_ready(page: Page, timeout_ms: int = 5000) -> bool:
+def wait_for_iframe_ready(page: Page, timeout_ms: int = 5000, is_cancelled: callable | None = None) -> bool:
     deadline = time.monotonic() + (timeout_ms / 1000)
     while time.monotonic() < deadline:
         selector = business_iframe_selector(page)
         if not selector:
-            page.wait_for_timeout(200)
+            wait_or_cancel(page, 200, is_cancelled)
             continue
         iframe = page.locator(selector)
         if iframe.count() > 0:
@@ -141,8 +155,16 @@ def wait_for_iframe_ready(page: Page, timeout_ms: int = 5000) -> bool:
                             return True
             except Exception:
                 pass
-        page.wait_for_timeout(200)
+        wait_or_cancel(page, 200, is_cancelled)
     return False
+
+
+def wait_or_cancel(page: Page, timeout_ms: int, is_cancelled: callable | None = None) -> None:
+    if is_cancelled is not None and is_cancelled():
+        raise CancelledError("任务已取消")
+    page.wait_for_timeout(timeout_ms)
+    if is_cancelled is not None and is_cancelled():
+        raise CancelledError("任务已取消")
 
 
 def _is_navigation_content_error(error: Exception) -> bool:
@@ -339,7 +361,12 @@ def build_feedback_url(page_url: str) -> str:
     )
 
 
-def save_login_state(account: AccountConfig, wait_seconds: int, logger: callable | None = None) -> str:
+def save_login_state(
+    account: AccountConfig,
+    wait_seconds: int,
+    logger: callable | None = None,
+    is_cancelled: callable | None = None,
+) -> str:
     state_path = Path(account.state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -355,14 +382,13 @@ def save_login_state(account: AccountConfig, wait_seconds: int, logger: callable
             deadline = datetime.now().timestamp() + wait_seconds
             saved = False
             while datetime.now().timestamp() < deadline:
-                page.wait_for_timeout(2000)
+                wait_or_cancel(page, 2000, is_cancelled)
                 if "token=" in page.url or "/wxamp/index/index" in page.url:
                     context.storage_state(path=str(state_path), indexed_db=True)
                     saved = True
                     break
-
             if not saved:
-                context.storage_state(path=str(state_path), indexed_db=True)
+                raise FetchError(f"账号 {account.name} 未在限定时间内检测到登录成功，已保留原登录态文件。")
         finally:
             _close_page(page)
             _close_context_and_browser(context, browser)
@@ -376,6 +402,7 @@ def save_login_state_with_profile(
     wait_seconds: int,
     profile_dir: str,
     logger: callable | None = None,
+    is_cancelled: callable | None = None,
 ) -> str:
     user_data_dir = Path(validate_shared_browser_profile_dir(profile_dir))
     user_data_dir.mkdir(parents=True, exist_ok=True)
@@ -397,14 +424,13 @@ def save_login_state_with_profile(
             deadline = datetime.now().timestamp() + wait_seconds
             saved = False
             while datetime.now().timestamp() < deadline:
-                page.wait_for_timeout(2000)
+                wait_or_cancel(page, 2000, is_cancelled)
                 if "token=" in page.url or "/wxamp/index/index" in page.url:
                     context.storage_state(path=str(state_path), indexed_db=True)
                     saved = True
                     break
-
             if not saved:
-                context.storage_state(path=str(state_path), indexed_db=True)
+                raise FetchError(f"账号 {account.name} 未在限定时间内检测到登录成功，已保留原登录态文件。")
         finally:
             _close_page(page)
             _close_context_and_browser(context, None)
@@ -490,7 +516,13 @@ def _wait_for_locator_items(page: Page, locator, timeout_ms: int = 1800, interva
     return locator.count() > 0
 
 
-def wait_for_switch_account_items(page: Page, selector: str, logger: callable | None = None, retry_limit: int = SWITCH_ACCOUNT_LIST_RETRY_LIMIT):
+def wait_for_switch_account_items(
+    page: Page,
+    selector: str,
+    logger: callable | None = None,
+    retry_limit: int = SWITCH_ACCOUNT_LIST_RETRY_LIMIT,
+    is_cancelled: callable | None = None,
+):
     locator = page.locator(selector)
     for attempt in range(1, retry_limit + 1):
         if _wait_for_locator_items(page, locator):
@@ -504,7 +536,7 @@ def wait_for_switch_account_items(page: Page, selector: str, logger: callable | 
                 close_icon.first.evaluate("e => e.click()")
             except Exception:
                 pass
-        page.wait_for_timeout(1200)
+        wait_or_cancel(page, 1200, is_cancelled)
         open_switch_account_dialog(page)
         locator = page.locator(selector)
     raise FetchError(f"未读取到切换账号列表，已重试 {retry_limit} 次。")
@@ -594,7 +626,14 @@ def _close_context_and_browser(context, browser, state_path: Path | None = None,
         raise browser_error
 
 
-def _fetch_account_in_page(page: Page, context, account: AccountConfig, logger: callable | None = None, profile_dir: str = "") -> FetchResult:
+def _fetch_account_in_page(
+    page: Page,
+    context,
+    account: AccountConfig,
+    logger: callable | None = None,
+    profile_dir: str = "",
+    is_cancelled: callable | None = None,
+) -> FetchResult:
     output_dir = account_output_dir(account.name)
     captures: list[Any] = []
 
@@ -607,7 +646,7 @@ def _fetch_account_in_page(page: Page, context, account: AccountConfig, logger: 
 
     bootstrap_url = resolve_bootstrap_url(account, output_dir)
     page.goto(bootstrap_url, wait_until="domcontentloaded", timeout=60000)
-    wait_for_url_contains(page, ("token=", "/wxamp/index/index"), timeout_ms=4000)
+    wait_for_url_contains(page, ("token=", "/wxamp/index/index"), timeout_ms=4000, is_cancelled=is_cancelled)
 
     if "token=" not in page.url and bootstrap_url == account.home_url:
         raise FetchError("当前登录态未自动跳入后台页，且没有可复用的历史反馈页地址，无法启动自动切换账号。")
@@ -623,7 +662,7 @@ def _fetch_account_in_page(page: Page, context, account: AccountConfig, logger: 
     feedback_url = build_feedback_url(page.url)
     _log(logger, f"账号 {account.name} 自动生成反馈页链接：{feedback_url}")
     page.goto(feedback_url, wait_until="domcontentloaded", timeout=60000)
-    wait_for_iframe_ready(page, timeout_ms=5000)
+    wait_for_iframe_ready(page, timeout_ms=5000, is_cancelled=is_cancelled)
     iframe_selector = business_iframe_selector(page)
 
     if not iframe_selector:
@@ -706,6 +745,7 @@ def fetch_account(
     headless: bool = True,
     logger: callable | None = None,
     profile_dir: str = "",
+    is_cancelled: callable | None = None,
 ) -> FetchResult:
     normalized_profile_dir = validate_shared_browser_profile_dir(profile_dir) if profile_dir.strip() else ""
     state_path = Path(account.state_path)
@@ -716,7 +756,7 @@ def fetch_account(
         browser, context = create_browser_context(playwright, account, headless, normalized_profile_dir)
         page = context.new_page()
         try:
-            return _fetch_account_in_page(page, context, account, logger, normalized_profile_dir)
+            return _fetch_account_in_page(page, context, account, logger, normalized_profile_dir, is_cancelled)
         finally:
             _close_page(page)
             _close_context_and_browser(context, browser)
@@ -728,6 +768,7 @@ def fetch_accounts_batch(
     logger: callable | None = None,
     progress: callable | None = None,
     profile_dir: str = "",
+    is_cancelled: callable | None = None,
 ) -> list[FetchResult]:
     normalized_profile_dir = validate_shared_browser_profile_dir(profile_dir) if profile_dir.strip() else ""
     enabled_accounts = [account for account in accounts if account.enabled and not account.is_entry_account]
@@ -742,6 +783,8 @@ def fetch_accounts_batch(
     results: list[FetchResult] = []
     with sync_playwright() as playwright:
         for group_accounts in grouped_accounts.values():
+            if is_cancelled is not None and is_cancelled():
+                break
             primary_account = group_accounts[0]
             state_path = Path(primary_account.state_path)
             if not state_path.exists() and not normalized_profile_dir:
@@ -750,16 +793,31 @@ def fetch_accounts_batch(
             browser, context = create_browser_context(playwright, primary_account, headless, normalized_profile_dir)
             try:
                 for account in group_accounts:
+                    if is_cancelled is not None and is_cancelled():
+                        break
                     page = context.new_page()
                     try:
-                        result = _fetch_account_in_page(page, context, account, logger, normalized_profile_dir)
+                        result = _fetch_account_in_page(
+                            page,
+                            context,
+                            account,
+                            logger,
+                            normalized_profile_dir,
+                            is_cancelled,
+                        )
+                    except CancelledError:
+                        break
                     except Exception as exc:
                         result = FetchResult(account_name=account.name, ok=False, note=str(exc))
                     finally:
                         _close_page(page)
+                    if is_cancelled is not None and is_cancelled():
+                        break
                     results.append(result)
                     if progress is not None:
                         progress(result)
+                if is_cancelled is not None and is_cancelled():
+                    break
             finally:
                 _close_context_and_browser(context, browser)
     return results

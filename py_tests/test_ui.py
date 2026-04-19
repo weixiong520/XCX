@@ -427,6 +427,36 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertEqual(window.settings.feishu_webhook, "https://open.feishu.cn/open-apis/bot/v2/hook/demo")
         mock_run_thread.assert_called_once()
 
+    def test_send_summary_preserves_actual_account_name_in_summary(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(
+                name="导入账号A",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                enabled=True,
+                last_status="抓取成功",
+                last_deadline="2026-04-20 11:42:31",
+                last_note="已完成详情页抓取。；当前实际账号：实际账号A",
+            ),
+        ]
+        captured_results = []
+
+        def fake_build_summary(results):
+            captured_results.extend(results)
+            return "summary"
+
+        with patch.object(window, "_run_thread") as mock_run_thread:
+            window._send_summary_with_webhook("https://example.com/hook")
+
+        job = mock_run_thread.call_args.args[0]
+        with patch("desktop_py.ui.main_window.build_summary", side_effect=fake_build_summary), patch(
+            "desktop_py.ui.main_window.send_feishu_text"
+        ):
+            job(lambda _message: None)
+        self.assertEqual(captured_results[0].actual_account_name, "实际账号A")
+
     def test_auto_fetch_and_send_uses_fetch_job_and_progress_callback(self):
         window = MainWindow()
         self.addCleanup(window.close)
@@ -611,8 +641,8 @@ class UiSmokeTestCase(unittest.TestCase):
         calls: list[str] = []
 
         class FakeThread:
-            def terminate(self):
-                calls.append("terminate")
+            def requestInterruption(self):
+                calls.append("interrupt")
 
             def wait(self, timeout):
                 calls.append(f"wait:{timeout}")
@@ -623,10 +653,10 @@ class UiSmokeTestCase(unittest.TestCase):
 
         window.stop_fetching()
 
-        self.assertEqual(calls, ["terminate", "wait:2000"])
+        self.assertEqual(calls, ["interrupt", "wait:2000"])
         self.assertEqual(window._threads, [])
         self.assertFalse(window.stop_fetch_button.isEnabled())
-        self.assertIn("已强制停止当前后台抓取任务", window.log_edit.toPlainText())
+        self.assertIn("已请求停止当前后台抓取任务", window.log_edit.toPlainText())
 
     def test_run_auto_fetch_push_requires_webhook(self):
         window = MainWindow()
