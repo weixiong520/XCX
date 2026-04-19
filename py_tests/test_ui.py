@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from desktop_py.core.models import AccountConfig, AppSettings, FetchResult
 from desktop_py.ui.account_dialog import AccountDialog
-from desktop_py.ui.main_window import MainWindow
+from desktop_py.ui.main_window import KEEP_ALIVE_INTERVAL_MS, MainWindow
 
 
 class UiSmokeTestCase(unittest.TestCase):
@@ -87,6 +87,36 @@ class UiSmokeTestCase(unittest.TestCase):
 
         self.assertFalse(event.isAccepted())
         self.assertFalse(window.isVisible())
+
+    def test_request_exit_hides_tray_and_quits_app(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+
+        class FakeTray:
+            def __init__(self):
+                self.hidden = False
+
+            def hide(self):
+                self.hidden = True
+
+        class FakeApp:
+            def __init__(self):
+                self.quit_called = False
+
+            def quit(self):
+                self.quit_called = True
+
+        fake_tray = FakeTray()
+        fake_app = FakeApp()
+        window.tray_icon = fake_tray
+
+        with patch("desktop_py.ui.main_window.QApplication.instance", return_value=fake_app), patch.object(window, "close") as mock_close:
+            window.request_exit()
+
+        self.assertTrue(window._allow_close)
+        self.assertTrue(fake_tray.hidden)
+        mock_close.assert_called_once()
+        self.assertTrue(fake_app.quit_called)
 
     def test_summary_cards_exclude_entry_account(self):
         window = MainWindow()
@@ -295,6 +325,7 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertTrue(window.import_button.isEnabled())
         self.assertTrue(window.validate_button.isEnabled())
         self.assertFalse(window.fetch_selected_button.isEnabled())
+        self.assertFalse(window.stop_fetch_button.isEnabled())
         self.assertTrue(window.delete_button.isEnabled())
 
         window.table.selectRow(1)
@@ -303,6 +334,7 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertFalse(window.import_button.isEnabled())
         self.assertFalse(window.validate_button.isEnabled())
         self.assertTrue(window.fetch_selected_button.isEnabled())
+        self.assertFalse(window.stop_fetch_button.isEnabled())
         self.assertTrue(window.delete_button.isEnabled())
 
     def test_multi_selection_disables_single_account_actions(self):
@@ -326,6 +358,7 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertFalse(window.import_button.isEnabled())
         self.assertFalse(window.validate_button.isEnabled())
         self.assertFalse(window.fetch_selected_button.isEnabled())
+        self.assertFalse(window.stop_fetch_button.isEnabled())
         self.assertTrue(window.delete_button.isEnabled())
 
     def test_imported_account_cannot_edit(self):
@@ -412,16 +445,41 @@ class UiSmokeTestCase(unittest.TestCase):
     def test_build_fetch_job_uses_batch_fetcher(self):
         window = MainWindow()
         self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
+        ]
         accounts = [
             AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True),
         ]
         job = window._build_fetch_job(accounts)
 
-        with patch("desktop_py.ui.main_window.fetch_accounts_batch", return_value=[]) as mock_batch:
+        with patch("desktop_py.ui.main_window.keep_alive_account_state", return_value=True) as mock_keep_alive, patch(
+            "desktop_py.ui.main_window.fetch_accounts_batch", return_value=[]
+        ) as mock_batch:
             result = job(lambda _message: None, lambda _payload: None)
 
         self.assertEqual(result, [])
+        mock_keep_alive.assert_called_once()
         mock_batch.assert_called_once()
+
+    def test_build_fetch_job_stops_when_keep_alive_fails(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
+        ]
+        accounts = [
+            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True),
+        ]
+        job = window._build_fetch_job(accounts)
+
+        with patch("desktop_py.ui.main_window.keep_alive_account_state", return_value=False), patch(
+            "desktop_py.ui.main_window.fetch_accounts_batch"
+        ) as mock_batch:
+            with self.assertRaisesRegex(RuntimeError, "登录态已失效"):
+                job(lambda _message: None, lambda _payload: None)
+
+        mock_batch.assert_not_called()
 
     def test_actions_include_single_run_fetch_and_push_button(self):
         window = MainWindow()
@@ -430,6 +488,32 @@ class UiSmokeTestCase(unittest.TestCase):
         buttons = [button.text() for button in window.findChildren(type(window.login_button)) if button.text()]
 
         self.assertIn("抓取并推送", buttons)
+        self.assertIn("停止抓取", buttons)
+        self.assertNotIn("抓取全部", buttons)
+
+    def test_send_summary_button_moves_to_fetch_all_slot(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.show()
+        self.app.processEvents()
+
+        self.assertIsNotNone(window.send_summary_button)
+        self.assertIsNotNone(window.fetch_selected_button)
+        self.assertIsNotNone(window.auto_fetch_push_switch)
+        self.assertGreater(window.send_summary_button.x(), window.fetch_selected_button.x())
+        self.assertLess(window.send_summary_button.x(), window.auto_fetch_push_switch.x())
+
+    def test_auto_fetch_and_send_button_moves_to_previous_send_summary_slot(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.show()
+        self.app.processEvents()
+
+        auto_fetch_button = next(button for button in window.findChildren(type(window.login_button)) if button.text() == "抓取并推送")
+        self.assertIsNotNone(window.send_summary_button)
+        self.assertIsNotNone(window.auto_fetch_push_switch)
+        self.assertGreater(auto_fetch_button.x(), window.send_summary_button.x())
+        self.assertLess(auto_fetch_button.x(), window.auto_fetch_push_switch.x())
 
     def test_toggle_auto_fetch_push_saves_setting_and_reschedules(self):
         window = MainWindow()
@@ -494,6 +578,80 @@ class UiSmokeTestCase(unittest.TestCase):
 
         mock_schedule.assert_called_once()
         mock_run.assert_called_once()
+
+    def test_keep_alive_interval_is_five_hours(self):
+        self.assertEqual(KEEP_ALIVE_INTERVAL_MS, 5 * 60 * 60 * 1000)
+
+    def test_handle_keep_alive_timeout_reschedules_and_runs_job(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+
+        with patch.object(window, "_apply_keep_alive_schedule") as mock_schedule, patch.object(window, "_run_keep_alive") as mock_run:
+            window._handle_keep_alive_timeout()
+
+        mock_schedule.assert_called_once()
+        mock_run.assert_called_once()
+
+    def test_run_keep_alive_uses_entry_account(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
+            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False),
+        ]
+
+        with patch.object(window, "_run_thread") as mock_run_thread:
+            window._run_keep_alive()
+
+        mock_run_thread.assert_called_once()
+        job = mock_run_thread.call_args.args[0]
+        with patch("desktop_py.ui.main_window.keep_alive_account_state", return_value=True) as mock_keep_alive:
+            self.assertTrue(job(lambda _message: None))
+        self.assertEqual(mock_keep_alive.call_args.args[0].name, "主账号")
+
+    def test_run_keep_alive_skips_when_background_task_exists(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window._threads.append(object())
+        window._update_action_buttons()
+
+        with patch.object(window, "_run_thread") as mock_run_thread:
+            window._run_keep_alive()
+
+        mock_run_thread.assert_not_called()
+        self.assertIn("当前存在后台任务", window.log_edit.toPlainText())
+
+    def test_stop_fetch_button_enabled_when_background_task_exists(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window._threads.append(object())
+
+        window._update_action_buttons()
+
+        self.assertTrue(window.stop_fetch_button.isEnabled())
+
+    def test_stop_fetching_terminates_running_threads(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        calls: list[str] = []
+
+        class FakeThread:
+            def terminate(self):
+                calls.append("terminate")
+
+            def wait(self, timeout):
+                calls.append(f"wait:{timeout}")
+                return True
+
+        window._threads = [FakeThread()]
+        window._update_action_buttons()
+
+        window.stop_fetching()
+
+        self.assertEqual(calls, ["terminate", "wait:2000"])
+        self.assertEqual(window._threads, [])
+        self.assertFalse(window.stop_fetch_button.isEnabled())
+        self.assertIn("已强制停止当前后台抓取任务", window.log_edit.toPlainText())
 
     def test_run_auto_fetch_push_requires_webhook(self):
         window = MainWindow()

@@ -7,6 +7,7 @@ from PySide6.QtCore import QEvent, QItemSelectionModel, QTimer, Signal, Qt
 from PySide6.QtGui import QColor, QCloseEvent, QGuiApplication, QKeySequence, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFrame,
     QDialog,
     QFileDialog,
@@ -33,6 +34,7 @@ from desktop_py.core.fetcher import (
     fetch_account,
     fetch_accounts_batch,
     fetch_switchable_accounts,
+    keep_alive_account_state,
     save_login_state,
     save_login_state_with_profile,
     validate_account_state,
@@ -60,6 +62,8 @@ BLOCKED_ACCOUNT_NAMES = {
     "山每北荒修僊4",
     "叨空SSR",
 }
+
+KEEP_ALIVE_INTERVAL_MS = 5 * 60 * 60 * 1000
 
 
 class HoverTableWidget(QTableWidget):
@@ -176,6 +180,8 @@ class MainWindow(QMainWindow):
         self.import_button: QPushButton | None = None
         self.validate_button: QPushButton | None = None
         self.fetch_selected_button: QPushButton | None = None
+        self.send_summary_button: QPushButton | None = None
+        self.stop_fetch_button: QPushButton | None = None
         self.delete_button: QPushButton | None = None
         self.browse_profile_button: QPushButton | None = None
         self.auto_fetch_push_switch: QPushButton | None = None
@@ -184,6 +190,9 @@ class MainWindow(QMainWindow):
         self._auto_fetch_timer = QTimer(self)
         self._auto_fetch_timer.setSingleShot(True)
         self._auto_fetch_timer.timeout.connect(self._handle_auto_fetch_push_timeout)
+        self._keep_alive_timer = QTimer(self)
+        self._keep_alive_timer.setSingleShot(True)
+        self._keep_alive_timer.timeout.connect(self._handle_keep_alive_timeout)
 
         self.setWindowTitle("小程序工具")
         self.setWindowFlag(Qt.WindowType.WindowTitleHint, True)
@@ -198,6 +207,7 @@ class MainWindow(QMainWindow):
         self._center_on_screen()
         QTimer.singleShot(0, self._auto_validate_entry_account)
         QTimer.singleShot(0, self._apply_auto_fetch_push_schedule)
+        QTimer.singleShot(0, self._apply_keep_alive_schedule)
 
     def _center_on_screen(self) -> None:
         screen = self.screen() or QGuiApplication.primaryScreen()
@@ -221,7 +231,12 @@ class MainWindow(QMainWindow):
 
     def request_exit(self) -> None:
         self._allow_close = True
+        if self.tray_icon is not None:
+            self.tray_icon.hide()
         self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def _build_ui(self) -> None:
         central = QWidget(self)
@@ -433,10 +448,10 @@ class MainWindow(QMainWindow):
             ("导入账号", self.import_accounts, 1, 0),
             ("保存登录", self.login_selected, 1, 1),
             ("检测登录", self.validate_selected, 1, 2),
-            ("抓取并推送", self.auto_fetch_and_send, 1, 3),
+            ("停止抓取", self.stop_fetching, 1, 3),
+            ("抓取并推送", self.auto_fetch_and_send, 2, 2),
             ("抓取选中", self.fetch_selected, 2, 0),
-            ("抓取全部", self.fetch_all, 2, 1),
-            ("发送飞书", self.send_summary, 2, 2),
+            ("发送飞书", self.send_summary, 2, 1),
         ]
         for text, handler, row, col in actions:
             button = QPushButton(text)
@@ -447,6 +462,9 @@ class MainWindow(QMainWindow):
             if text == "删除账号":
                 self.delete_button = button
                 button.setProperty("role", "danger")
+            if text == "停止抓取":
+                self.stop_fetch_button = button
+                button.setProperty("role", "danger")
             if text == "导入账号":
                 self.import_button = button
             if text == "检测登录":
@@ -454,10 +472,11 @@ class MainWindow(QMainWindow):
             if text == "抓取选中":
                 self.fetch_selected_button = button
             if text == "发送飞书":
+                self.send_summary_button = button
                 button.setProperty("role", "success")
             if text == "抓取并推送":
                 button.setProperty("role", "success")
-            elif text != "删除账号":
+            elif text not in {"删除账号", "停止抓取"}:
                 button.setProperty("role", "primary")
             button.setMinimumWidth(0)
             button.clicked.connect(handler)
@@ -758,7 +777,7 @@ class MainWindow(QMainWindow):
     def _auto_validate_entry_account(self) -> None:
         if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
             return
-        account = next((item for item in self.accounts if item.is_entry_account), None)
+        account = self._entry_account()
         if account is None:
             return
         account.last_status = "检测中"
@@ -777,6 +796,17 @@ class MainWindow(QMainWindow):
             return bool(validate_account_state(account, None, self.settings.browser_profile_dir))
         except Exception:
             return False
+
+    def _entry_account(self) -> AccountConfig | None:
+        return next((item for item in self.accounts if item.is_entry_account), None)
+
+    def _account_for_keep_alive(self, candidates: list[AccountConfig] | None = None) -> AccountConfig | None:
+        entry_account = self._entry_account()
+        if entry_account is not None:
+            return entry_account
+        if candidates:
+            return candidates[0]
+        return None
 
     def selected_index(self) -> int:
         selected = self.table.selectionModel().selectedRows()
@@ -810,6 +840,25 @@ class MainWindow(QMainWindow):
             self.fetch_selected_button.setEnabled(bool(account and not account.is_entry_account))
         if self.delete_button is not None:
             self.delete_button.setEnabled(bool(selected_indexes))
+        if self.stop_fetch_button is not None:
+            self.stop_fetch_button.setEnabled(bool(self._threads))
+
+    def stop_fetching(self) -> None:
+        if not self._threads:
+            self._show_info("提示", "当前没有正在执行的抓取或推送任务。")
+            return
+        running_threads = list(self._threads)
+        for thread in running_threads:
+            try:
+                thread.terminate()
+                thread.wait(2000)
+            except Exception:
+                continue
+        self._threads.clear()
+        self._update_action_buttons()
+        self.append_log("已强制停止当前后台抓取任务。")
+        self.statusBar().showMessage("已停止后台任务", 4000)
+        self._set_status_text("后台任务已停止")
 
     def _update_current_main_account(self, account_name: str) -> None:
         current_name = account_name.strip()
@@ -1056,14 +1105,19 @@ class MainWindow(QMainWindow):
         if account.is_entry_account:
             self._show_info("提示", "主账号不参与抓取，请选择导入账号。")
             return
-        self._run_thread(
-            lambda log: fetch_account(
+
+        def job(log) -> FetchResult:
+            self._ensure_login_alive_for_fetch(log, [account])
+            return fetch_account(
                 account,
                 0,
                 self.settings.headless_fetch,
                 log,
                 self.settings.browser_profile_dir,
-            ),
+            )
+
+        self._run_thread(
+            job,
             on_success=lambda result: self._mark_fetch_result(account, result),
         )
 
@@ -1122,6 +1176,34 @@ class MainWindow(QMainWindow):
         self._apply_auto_fetch_push_schedule()
         self._run_auto_fetch_push()
 
+    def _apply_keep_alive_schedule(self) -> None:
+        self._keep_alive_timer.stop()
+        self._keep_alive_timer.start(KEEP_ALIVE_INTERVAL_MS)
+
+    def _handle_keep_alive_timeout(self) -> None:
+        self._apply_keep_alive_schedule()
+        self._run_keep_alive()
+
+    def _run_keep_alive(self) -> None:
+        if self._threads:
+            self.append_log("静默保活已跳过：当前存在后台任务。")
+            return
+        account = self._account_for_keep_alive()
+        if account is None:
+            self.append_log("静默保活已跳过：未配置主账号。")
+            return
+        self._run_thread(
+            lambda log: keep_alive_account_state(account, log, self.settings.browser_profile_dir),
+            on_success=lambda ok: self._mark_keep_alive_result(account, bool(ok)),
+            update_status=False,
+        )
+
+    def _mark_keep_alive_result(self, account: AccountConfig, valid: bool) -> None:
+        account.last_status = "登录有效" if valid else "登录失效"
+        account.last_note = "静默保活成功，可直接抓取" if valid else "静默保活失败，请重新保存登录态"
+        save_accounts(self.accounts)
+        self.refresh_table()
+
     def _run_auto_fetch_push(self) -> None:
         webhook = self.webhook_edit.text().strip() or self.settings.feishu_webhook.strip()
         if not webhook:
@@ -1141,6 +1223,7 @@ class MainWindow(QMainWindow):
 
     def _build_fetch_job(self, enabled_accounts: list[AccountConfig]):
         def job(log, progress) -> list[FetchResult]:
+            self._ensure_login_alive_for_fetch(log, enabled_accounts)
             return fetch_accounts_batch(
                 enabled_accounts,
                 headless=self.settings.headless_fetch,
@@ -1150,6 +1233,14 @@ class MainWindow(QMainWindow):
             )
 
         return job
+
+    def _ensure_login_alive_for_fetch(self, logger, candidates: list[AccountConfig]) -> None:
+        account = self._account_for_keep_alive(candidates)
+        if account is None:
+            return
+        if keep_alive_account_state(account, logger, self.settings.browser_profile_dir):
+            return
+        raise RuntimeError("登录态已失效，请重新保存登录态后再抓取。")
 
     def _mark_fetch_progress(self, result: FetchResult) -> None:
         account = next((item for item in self.accounts if item.name == result.account_name), None)
@@ -1225,12 +1316,18 @@ class MainWindow(QMainWindow):
         if emit_failure_log:
             thread.failed.connect(lambda message: self.append_log(f"任务失败：{message}"))
         thread.succeeded.connect(on_success)
-        thread.finished.connect(lambda: self._threads.remove(thread) if thread in self._threads else None)
+        thread.finished.connect(lambda: self._handle_thread_finished(thread))
         self._threads.append(thread)
+        self._update_action_buttons()
         thread.start()
         if update_status:
             self.statusBar().showMessage("任务执行中…")
             self._set_status_text("后台任务执行中…")
+
+    def _handle_thread_finished(self, thread: TaskThread) -> None:
+        if thread in self._threads:
+            self._threads.remove(thread)
+        self._update_action_buttons()
 
     def _refresh_summary_cards(self) -> None:
         imported_accounts = [account for account in self.accounts if not account.is_entry_account]

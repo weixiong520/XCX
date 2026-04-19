@@ -772,6 +772,13 @@ def validate_account_state(account: AccountConfig, logger: callable | None = Non
     return valid
 
 
+def keep_alive_account_state(account: AccountConfig, logger: callable | None = None, profile_dir: str = "") -> bool:
+    _log(logger, f"开始静默保活账号 {account.name}。")
+    valid = validate_account_state(account, logger, profile_dir)
+    _log(logger, f"账号 {account.name} 静默保活{'成功' if valid else '失败'}。")
+    return valid
+
+
 def _log(logger: callable | None, message: str) -> None:
     if logger:
         logger(message)

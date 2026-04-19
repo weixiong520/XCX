@@ -11,6 +11,7 @@ from desktop_py.core.fetcher import (
     fetch_accounts_batch,
     fetch_switchable_accounts,
     find_switch_entry,
+    keep_alive_account_state,
     resolve_bootstrap_url,
     save_login_state,
     safe_page_content,
@@ -20,6 +21,7 @@ from desktop_py.core.fetcher import (
     should_switch_account,
     should_retry_switch_from_home,
     should_switch_for_account,
+    validate_account_state,
 )
 from desktop_py.core.models import AccountConfig
 
@@ -506,6 +508,63 @@ class FetcherTestCase(unittest.TestCase):
                 fetch_switchable_accounts(AccountConfig(name="主账号", state_path="storage/shared.json"), profile_dir="")
 
         self.assertEqual(calls, ["page", "context", "browser"])
+
+    def test_validate_account_state_persists_shared_profile_state(self):
+        calls: list[str] = []
+
+        class FakePageForValidation:
+            url = "https://mp.weixin.qq.com/wxamp/index/index?token=1"
+
+            def goto(self, _url, wait_until=None, timeout=None):
+                calls.append("goto")
+
+            def close(self):
+                calls.append("page")
+
+        class FakeContextForValidation:
+            def __init__(self):
+                self.page = FakePageForValidation()
+
+            def new_page(self):
+                return self.page
+
+            def storage_state(self, path=None, indexed_db=False):
+                calls.append(f"storage:{path}:{indexed_db}")
+
+            def close(self):
+                calls.append("context")
+
+        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
+            "desktop_py.core.fetcher.create_browser_context",
+            return_value=(None, FakeContextForValidation()),
+        ), patch("desktop_py.core.fetcher.validate_shared_browser_profile_dir", return_value="C:/profile"), patch(
+            "desktop_py.core.fetcher.wait_for_url_contains", return_value=True
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            valid = validate_account_state(
+                AccountConfig(name="主账号", state_path="storage/shared.json"),
+                profile_dir="C:/profile",
+            )
+
+        self.assertTrue(valid)
+        self.assertIn("storage:storage\\shared.json:True", calls)
+        self.assertEqual(calls[-2:], ["storage:storage\\shared.json:True", "context"])
+
+    def test_keep_alive_account_state_reuses_validation(self):
+        logs: list[str] = []
+
+        with patch("desktop_py.core.fetcher.validate_account_state", return_value=True) as mock_validate:
+            valid = keep_alive_account_state(
+                AccountConfig(name="主账号", state_path="storage/shared.json"),
+                logger=logs.append,
+                profile_dir="C:/profile",
+            )
+
+        self.assertTrue(valid)
+        mock_validate.assert_called_once()
+        self.assertIn("开始静默保活账号 主账号。", logs)
+        self.assertIn("账号 主账号 静默保活成功。", logs)
 
 if __name__ == "__main__":
     unittest.main()
