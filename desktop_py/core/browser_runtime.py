@@ -12,6 +12,8 @@ from desktop_py.core.store import runtime_root
 
 
 APP_NAME = "小程序工具"
+DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST = "https://npmmirror.com/mirrors/playwright"
+DEFAULT_PLAYWRIGHT_DOWNLOAD_TIMEOUT_MS = "120000"
 
 
 def browsers_root() -> Path:
@@ -59,11 +61,19 @@ def playwright_install_command() -> list[str]:
     return [sys.executable, "-m", "playwright", "install", "chromium"]
 
 
+def playwright_install_environment(target: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    env["PLAYWRIGHT_BROWSERS_PATH"] = str(target)
+    if not env.get("PLAYWRIGHT_DOWNLOAD_HOST") and not env.get("PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST"):
+        env["PLAYWRIGHT_DOWNLOAD_HOST"] = DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST
+    env.setdefault("PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT", DEFAULT_PLAYWRIGHT_DOWNLOAD_TIMEOUT_MS)
+    return env
+
+
 def install_playwright_browsers(logger: callable | None = None) -> tuple[bool, str]:
     target = configure_playwright_environment()
     target.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
-    env["PLAYWRIGHT_BROWSERS_PATH"] = str(target)
+    env = playwright_install_environment(target)
 
     process = subprocess.Popen(
         playwright_install_command(),
