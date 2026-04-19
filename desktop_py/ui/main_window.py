@@ -885,7 +885,7 @@ class MainWindow(QMainWindow):
             browser_profile_dir = validate_shared_browser_profile_dir(self.profile_dir_edit.text().strip())
             self.settings = AppSettings(
                 feishu_webhook=self.webhook_edit.text().strip(),
-                login_wait_seconds=120,
+                login_wait_seconds=self.settings.login_wait_seconds,
                 headless_fetch=self.settings.headless_fetch,
                 browser_profile_dir=browser_profile_dir,
                 current_main_account_name=self.settings.current_main_account_name,

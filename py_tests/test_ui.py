@@ -558,6 +558,19 @@ class UiSmokeTestCase(unittest.TestCase):
 
         self.assertFalse(window.settings.headless_fetch)
 
+    def test_save_current_settings_preserves_login_wait_seconds_value(self):
+        with patch("desktop_py.ui.main_window.load_settings", return_value=AppSettings(login_wait_seconds=45)):
+            window = MainWindow()
+        self.addCleanup(window.close)
+
+        with patch("desktop_py.ui.main_window.validate_shared_browser_profile_dir", return_value=""), patch(
+            "desktop_py.ui.main_window.save_settings"
+        ) as mock_save_settings:
+            window.save_current_settings()
+
+        self.assertEqual(window.settings.login_wait_seconds, 45)
+        self.assertEqual(mock_save_settings.call_args.args[0].login_wait_seconds, 45)
+
     def test_milliseconds_until_next_auto_fetch_push_before_nine(self):
         window = MainWindow()
         self.addCleanup(window.close)
