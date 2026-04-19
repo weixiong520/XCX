@@ -1,6 +1,6 @@
 # 小程序工具
 
-这个项目名为“小程序工具”，用于管理微信小游戏后台账号，保存登录态，并抓取“未成年人支付退款”页面中的处理截止时间。当前仓库以 Python 桌面版为主，同时保留了早期的 Node.js 命令行抓取脚本。
+这个项目名为“小程序工具”，用于管理微信小游戏后台账号，保存登录态，并抓取“未成年人支付退款”页面中的处理截止时间。当前仓库以 Python 桌面版为唯一抓取实现。
 
 ## 桌面版功能
 
@@ -101,36 +101,6 @@ python desktop_py_cli.py notify
 - `output/desktop_py/<账号>/`：抓取产物
 - `ms-playwright/`：首次运行后下载的浏览器运行时
 
-## Node.js 命令行脚本
-
-仓库中仍保留早期的 Node.js 版 CLI，适合直接使用固定链接抓取单页数据。
-
-### 依赖
-
-```powershell
-npm install
-npx playwright install chromium
-```
-
-### 保存登录态
-
-```powershell
-npm run auth -- --url "https://mp.weixin.qq.com/"
-```
-
-### 抓取截止时间
-
-```powershell
-npm run fetch -- --url "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=488439400&lang=zh_CN"
-```
-
-### Node 版输出目录
-
-- `output/latest/page.html`
-- `output/latest/page.txt`
-- `output/latest/responses.json`
-- `output/latest/result.json`
-
 ## 抓取说明
 
 - 当前版本优先从 iframe 详情页中提取“处理截止时间”
@@ -143,14 +113,6 @@ npm run fetch -- --url "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/game
 
 ## 本地验证
 
-### Python 测试
-
 ```powershell
 python -m unittest discover -s py_tests -v
-```
-
-### Node 测试
-
-```powershell
-npm test
 ```

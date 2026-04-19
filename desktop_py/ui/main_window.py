@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 
 from PySide6.QtCore import QEvent, QItemSelectionModel, QTimer, Signal, Qt
@@ -51,8 +51,21 @@ from desktop_py.core.store import (
     save_settings,
     validate_shared_browser_profile_dir,
 )
+from desktop_py.ui.account_presenter import (
+    apply_batch_fetch_results,
+    apply_fetch_result,
+    deadline_tooltip_text,
+    display_account_name,
+    display_deadline_text,
+    display_result_text,
+    is_no_business_page_note,
+    next_auto_fetch_push_interval_ms,
+    parse_deadline_for_sort,
+    sort_accounts_for_display,
+)
 from desktop_py.ui.account_dialog import AccountDialog
 from desktop_py.ui.message_dialog import MessageDialog
+from desktop_py.ui.task_runner import WindowTaskRunner
 from desktop_py.ui.workers import TaskThread
 
 
@@ -173,6 +186,14 @@ class MainWindow(QMainWindow):
         self.settings = load_settings()
         self._reset_current_main_account_name()
         self._threads: list[TaskThread] = []
+        self._task_runner = WindowTaskRunner(
+            parent=self,
+            threads=self._threads,
+            append_log=self.append_log,
+            update_action_buttons=self._update_action_buttons,
+            set_status_text=self._set_status_text,
+            status_message=lambda message, timeout: self.statusBar().showMessage(message, timeout),
+        )
         self._summary_labels: dict[str, QLabel] = {}
         self._status_label: QLabel | None = None
         self.login_button: QPushButton | None = None
@@ -718,55 +739,22 @@ class MainWindow(QMainWindow):
         self._update_action_buttons()
 
     def _sort_accounts_for_display(self) -> None:
-        indexed_accounts = list(enumerate(self.accounts))
-
-        def sort_key(item: tuple[int, AccountConfig]) -> tuple[int, int, datetime, int]:
-            index, account = item
-            if account.is_entry_account:
-                return (0, 0, datetime.min, index)
-            deadline = self._parse_deadline_for_sort(account.last_deadline)
-            if deadline is not None:
-                return (1, 0, deadline, index)
-            return (2, 0, datetime.max, index)
-
-        self.accounts = [account for _, account in sorted(indexed_accounts, key=sort_key)]
+        self.accounts = sort_accounts_for_display(self.accounts)
 
     def _parse_deadline_for_sort(self, deadline_text: str) -> datetime | None:
-        value = deadline_text.strip()
-        if not value:
-            return None
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-            try:
-                return datetime.strptime(value, fmt)
-            except ValueError:
-                continue
-        return None
+        return parse_deadline_for_sort(deadline_text)
 
     def _display_deadline_text(self, account: AccountConfig) -> str:
-        if account.is_entry_account and not account.last_deadline:
-            return "--"
-        if account.last_status == "抓取成功":
-            return account.last_deadline or "无待处理"
-        if account.last_status == "抓取失败":
-            if self._is_no_business_page_note(account.last_note):
-                return "无业面"
-            return account.last_note or "抓取失败"
-        return account.last_deadline
+        return display_deadline_text(account)
 
     def _deadline_tooltip_text(self, account: AccountConfig) -> str:
-        if account.last_status == "抓取失败" and account.last_note:
-            return account.last_note
-        return self._display_deadline_text(account)
+        return deadline_tooltip_text(account)
 
     def _is_no_business_page_note(self, note: str) -> bool:
-        return "页面未出现业务 iframe" in note
+        return is_no_business_page_note(note)
 
     def _display_result_text(self, account: AccountConfig) -> str:
-        if account.last_status in {"抓取成功", "登录有效", "已保存登录态"}:
-            return "完成"
-        if not account.last_status or account.last_status == "检测中":
-            return ""
-        return "失败"
+        return display_result_text(account)
 
     def _show_info(self, title: str, text: str) -> None:
         MessageDialog.show_info(self, title, text)
@@ -868,12 +856,7 @@ class MainWindow(QMainWindow):
         save_settings(self.settings)
 
     def _display_account_name(self, account: AccountConfig) -> str:
-        if account.is_entry_account:
-            current_name = self.settings.current_main_account_name.strip()
-            if current_name:
-                return f"主账号状态：{current_name}"
-            return "主账号状态：未记录"
-        return account.name
+        return display_account_name(account, self.settings.current_main_account_name)
 
     def _reset_current_main_account_name(self) -> None:
         if not self.settings.current_main_account_name.strip():
@@ -1162,11 +1145,7 @@ class MainWindow(QMainWindow):
         self._auto_fetch_timer.start(interval)
 
     def _milliseconds_until_next_auto_fetch_push(self, now: datetime | None = None) -> int:
-        current = now or datetime.now()
-        target = current.replace(hour=9, minute=0, second=0, microsecond=0)
-        if current >= target:
-            target += timedelta(days=1)
-        return max(int((target - current).total_seconds() * 1000), 1)
+        return next_auto_fetch_push_interval_ms(now)
 
     def _handle_auto_fetch_push_timeout(self) -> None:
         self._apply_auto_fetch_push_schedule()
@@ -1236,32 +1215,13 @@ class MainWindow(QMainWindow):
         self._mark_fetch_result(account, result)
 
     def _mark_fetch_result(self, account: AccountConfig, result: FetchResult) -> None:
-        account.last_fetch_at = result.fetched_at
-        account.last_deadline = result.deadline_text
-        account.last_status = "抓取成功" if result.ok else "抓取失败"
-        actual_note = f"当前实际账号：{result.actual_account_name}" if result.actual_account_name else ""
-        account.last_note = "；".join(item for item in [result.note, actual_note] if item)
-        account.feedback_url = result.page_url
+        current_main_account_name = apply_fetch_result(account, result)
         save_accounts(self.accounts)
-        self._update_current_main_account(result.actual_account_name or account.name)
+        self._update_current_main_account(current_main_account_name)
         self.refresh_table()
 
     def _mark_batch_results(self, results: list[FetchResult]) -> None:
-        latest_actual_account_name = ""
-        result_map = {result.account_name: result for result in results}
-        for account in self.accounts:
-            result = result_map.get(account.name)
-            if not result:
-                continue
-            account.last_fetch_at = result.fetched_at
-            account.last_deadline = result.deadline_text
-            account.last_status = "抓取成功" if result.ok else "抓取失败"
-            actual_note = f"当前实际账号：{result.actual_account_name}" if result.actual_account_name else ""
-            account.last_note = "；".join(item for item in [result.note, actual_note] if item)
-            if result.page_url:
-                account.feedback_url = result.page_url
-            if result.actual_account_name:
-                latest_actual_account_name = result.actual_account_name
+        latest_actual_account_name = apply_batch_fetch_results(self.accounts, results)
         save_accounts(self.accounts)
         if latest_actual_account_name:
             self._update_current_main_account(latest_actual_account_name)
@@ -1295,26 +1255,17 @@ class MainWindow(QMainWindow):
         )
 
     def _run_thread(self, job_builder, on_success, emit_log: bool = True, emit_failure_log: bool = True, update_status: bool = True, on_progress=None) -> None:
-        thread = TaskThread(job_builder, self)
-        if emit_log:
-            thread.message.connect(self.append_log)
-        if on_progress is not None:
-            thread.progress.connect(on_progress)
-        if emit_failure_log:
-            thread.failed.connect(lambda message: self.append_log(f"任务失败：{message}"))
-        thread.succeeded.connect(on_success)
-        thread.finished.connect(lambda: self._handle_thread_finished(thread))
-        self._threads.append(thread)
-        self._update_action_buttons()
-        thread.start()
-        if update_status:
-            self.statusBar().showMessage("任务执行中…")
-            self._set_status_text("后台任务执行中…")
+        self._task_runner.run(
+            job_builder,
+            on_success,
+            emit_log=emit_log,
+            emit_failure_log=emit_failure_log,
+            update_status=update_status,
+            on_progress=on_progress,
+        )
 
     def _handle_thread_finished(self, thread: TaskThread) -> None:
-        if thread in self._threads:
-            self._threads.remove(thread)
-        self._update_action_buttons()
+        self._task_runner.handle_finished(thread)
 
     def _refresh_summary_cards(self) -> None:
         imported_accounts = [account for account in self.accounts if not account.is_entry_account]

@@ -18,7 +18,7 @@ build/
 ms-playwright/
 tools/
 
-# Python/Node 缓存与本地工具输出
+# Python 缓存与本地工具输出
 __pycache__/
 *.py[cod]
 .pytest_cache/

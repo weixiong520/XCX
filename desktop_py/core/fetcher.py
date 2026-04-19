@@ -23,6 +23,12 @@ class FetchError(RuntimeError):
 
 
 SWITCH_ACCOUNT_LIST_RETRY_LIMIT = 3
+BUSINESS_IFRAME_SELECTORS = (
+    "#js_iframe",
+    "iframe[src*='gameFeedback']",
+    "iframe[src*='refund']",
+    "iframe",
+)
 
 
 def find_switch_entry(page: Page) -> Locator | None:
@@ -92,10 +98,24 @@ def wait_for_current_account_name(page: Page, expected_name: str, timeout_ms: in
     return extract_current_account_name(page)
 
 
+def business_iframe_selector(page: Page) -> str:
+    for selector in BUSINESS_IFRAME_SELECTORS:
+        try:
+            if page.locator(selector).count() > 0:
+                return selector
+        except Exception:
+            continue
+    return ""
+
+
 def wait_for_iframe_ready(page: Page, timeout_ms: int = 5000) -> bool:
-    iframe = page.locator("#js_iframe")
     deadline = time.monotonic() + (timeout_ms / 1000)
     while time.monotonic() < deadline:
+        selector = business_iframe_selector(page)
+        if not selector:
+            page.wait_for_timeout(200)
+            continue
+        iframe = page.locator(selector)
         if iframe.count() > 0:
             try:
                 handle = iframe.element_handle()
@@ -604,13 +624,14 @@ def _fetch_account_in_page(page: Page, context, account: AccountConfig, logger: 
     _log(logger, f"账号 {account.name} 自动生成反馈页链接：{feedback_url}")
     page.goto(feedback_url, wait_until="domcontentloaded", timeout=60000)
     wait_for_iframe_ready(page, timeout_ms=5000)
+    iframe_selector = business_iframe_selector(page)
 
-    if page.locator("#js_iframe").count() == 0:
+    if not iframe_selector:
         html = safe_page_content(page)
         (output_dir / "page.html").write_text(html, encoding="utf-8")
         raise FetchError("页面未出现业务 iframe，可能是链接失效、无权限或登录态失效。")
 
-    frame_locator = page.frame_locator("#js_iframe")
+    frame_locator = page.frame_locator(iframe_selector)
 
     list_text = frame_locator.locator("body").text_content(timeout=15000) or ""
     if "退款申请(0)" in list_text or "暂无内容" in list_text:

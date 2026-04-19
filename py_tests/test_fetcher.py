@@ -8,6 +8,7 @@ from desktop_py.core.fetcher import (
     _capture_response_payload,
     _close_context_and_browser,
     build_feedback_url,
+    business_iframe_selector,
     fetch_accounts_batch,
     fetch_switchable_accounts,
     find_switch_entry,
@@ -15,6 +16,7 @@ from desktop_py.core.fetcher import (
     resolve_bootstrap_url,
     save_login_state,
     safe_page_content,
+    wait_for_iframe_ready,
     wait_for_switch_account_items,
     wait_for_url_contains,
     wait_for_current_account_name,
@@ -24,12 +26,40 @@ from desktop_py.core.fetcher import (
     validate_account_state,
 )
 from desktop_py.core.models import AccountConfig
+from desktop_py.core.parser import extract_labeled_datetime
+
+
+class FakeElementHandle:
+    def __init__(self, frame):
+        self._frame = frame
+
+    def content_frame(self):
+        return self._frame
+
+
+class FakeFrame:
+    def __init__(self, text: str = "", html: str = "", url: str = "https://example.com/frame"):
+        self.url = url
+        self._text = text
+        self._html = html
+        self.load_state_calls: list[tuple[str | None, int | None]] = []
+
+    def wait_for_load_state(self, state=None, timeout=None):
+        self.load_state_calls.append((state, timeout))
+
+    def locator(self, selector):
+        if selector == "body":
+            return FakeLocator(count=1, text=self._text, html=self._html)
+        return FakeLocator()
 
 
 class FakeLocator:
-    def __init__(self, count: int = 0, counts: list[int] | None = None):
+    def __init__(self, count: int = 0, counts: list[int] | None = None, frame=None, text: str = "", html: str = ""):
         self._count = count
         self._counts = list(counts) if counts is not None else None
+        self._frame = frame
+        self._text = text
+        self._html = html
         self.first = self
 
     def count(self) -> int:
@@ -41,6 +71,17 @@ class FakeLocator:
 
     def evaluate(self, _script):
         return None
+
+    def element_handle(self):
+        if self._frame is None:
+            return None
+        return FakeElementHandle(self._frame)
+
+    def text_content(self, timeout=None):
+        return self._text
+
+    def inner_html(self, timeout=None):
+        return self._html
 
 
 class FakePage:
@@ -280,6 +321,45 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertEqual(actual_name, "目标账号")
 
+    def test_business_iframe_selector_prefers_js_iframe(self):
+        page = FakePage(
+            locator_map={
+                ("#js_iframe", None): FakeLocator(count=1),
+                ("iframe[src*='gameFeedback']", None): FakeLocator(count=1),
+            }
+        )
+
+        self.assertEqual(business_iframe_selector(page), "#js_iframe")
+
+    def test_business_iframe_selector_falls_back_to_game_feedback_iframe(self):
+        page = FakePage(
+            locator_map={
+                ("#js_iframe", None): FakeLocator(count=0),
+                ("iframe[src*='gameFeedback']", None): FakeLocator(count=1),
+            }
+        )
+
+        self.assertEqual(business_iframe_selector(page), "iframe[src*='gameFeedback']")
+
+    def test_wait_for_iframe_ready_accepts_fallback_iframe_with_refund_text(self):
+        frame = FakeFrame(text="退款申请 处理截止时间：2026-04-20 18:00")
+        page = FakePage(
+            locator_map={
+                ("#js_iframe", None): FakeLocator(count=0),
+                ("iframe[src*='gameFeedback']", None): FakeLocator(count=1, frame=frame),
+            }
+        )
+
+        self.assertTrue(wait_for_iframe_ready(page, timeout_ms=1000))
+        self.assertIn(("domcontentloaded", 1000), frame.load_state_calls)
+
+    def test_offline_fixture_extracts_deadline_from_page_text(self):
+        text = "退款申请详情 处理截止时间：2026-04-20 18:00 请尽快处理"
+
+        deadline = extract_labeled_datetime(text, "处理截止时间")
+
+        self.assertEqual(deadline, "2026-04-20 18:00")
+
     def test_safe_page_content_retries_until_success(self):
         page = FakePage()
         page.set_content_results([RuntimeError("navigating"), "<html>ok</html>"])
@@ -330,6 +410,27 @@ class FetcherTestCase(unittest.TestCase):
         payload = _capture_response_payload(response)
 
         self.assertEqual(payload["body"]["data"]["user_refund_check_list"][0]["ctrl_info"]["appeal_deadline_time"], "1776737974")
+
+    def test_offline_response_fixture_extracts_deadline_candidate(self):
+        deadline = _fallback_from_responses(
+            [
+                {
+                    "body": {
+                        "data": {
+                            "user_refund_check_list": [
+                                {
+                                    "ctrl_info": {
+                                        "appeal_deadline_time": "2026-04-20 18:00",
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        )
+
+        self.assertEqual(deadline, "2026-04-20 18:00")
 
     def test_fetch_accounts_batch_groups_accounts_by_state_path(self):
         accounts = [
