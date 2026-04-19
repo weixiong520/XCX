@@ -6,7 +6,9 @@ from unittest.mock import patch
 from desktop_py.core.browser_runtime import (
     DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
     DEFAULT_PLAYWRIGHT_DOWNLOAD_TIMEOUT_MS,
+    _should_retry_with_official_host,
     configure_playwright_environment,
+    install_playwright_browsers,
     playwright_install_environment,
     playwright_install_command,
     playwright_browsers_ready,
@@ -91,6 +93,35 @@ class BrowserRuntimeTestCase(unittest.TestCase):
 
         self.assertNotIn("PLAYWRIGHT_DOWNLOAD_HOST", env)
         self.assertEqual(env["PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST"], "https://example.com/chromium")
+
+    def test_should_retry_with_official_host_for_default_mirror_404(self):
+        env = {"PLAYWRIGHT_DOWNLOAD_HOST": DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST}
+        self.assertTrue(_should_retry_with_official_host("Error: server returned code 404 NoSuchKey", env))
+
+    def test_should_not_retry_with_official_host_for_custom_mirror(self):
+        env = {"PLAYWRIGHT_DOWNLOAD_HOST": "https://example.com/playwright"}
+        self.assertFalse(_should_retry_with_official_host("Error: server returned code 404 NoSuchKey", env))
+
+    def test_install_playwright_browsers_retries_official_host_after_mirror_404(self):
+        call_envs: list[dict[str, str]] = []
+
+        def fake_run(env, logger=None):
+            call_envs.append(dict(env))
+            if len(call_envs) == 1:
+                return False, "Error: server returned code 404\n<Code>NoSuchKey</Code>"
+            return True, "ok"
+
+        logs: list[str] = []
+        with patch("desktop_py.core.browser_runtime.configure_playwright_environment", return_value=Path(r"C:\portable\小程序工具\ms-playwright")), patch(
+            "desktop_py.core.browser_runtime._run_playwright_install", side_effect=fake_run
+        ):
+            ok, output = install_playwright_browsers(logs.append)
+
+        self.assertTrue(ok)
+        self.assertEqual(output, "ok")
+        self.assertEqual(call_envs[0]["PLAYWRIGHT_DOWNLOAD_HOST"], DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST)
+        self.assertNotIn("PLAYWRIGHT_DOWNLOAD_HOST", call_envs[1])
+        self.assertIn("国内镜像缺少当前浏览器资源，正在切换官方源重试。", logs)
 
 
 if __name__ == "__main__":
