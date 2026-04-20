@@ -28,6 +28,15 @@ function Resolve-InnoCompilerPath {
     throw "未找到项目内 Inno Setup 编译器。请先准备 tools\inno\ISCC.exe。"
 }
 
+function Assert-PyInstallerAvailable {
+    try {
+        python -m PyInstaller --version | Out-Null
+    }
+    catch {
+        throw "未检测到 PyInstaller。请先执行：python -m pip install -r requirements-build.txt"
+    }
+}
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $distRoot = Join-Path $projectRoot "dist"
 $installerSourceRoot = Join-Path $projectRoot "build\installer-source"
@@ -35,6 +44,7 @@ $appName = "小程序工具"
 $installerSourceDir = Join-Path $installerSourceRoot $appName
 $installerExeName = "$appName.exe"
 $innoCompiler = Resolve-InnoCompilerPath -ProjectRoot $projectRoot
+Assert-PyInstallerAvailable
 
 $installerScript = if ($Clean) {
     Join-Path $PSScriptRoot "installer_clean.iss"
@@ -103,7 +113,7 @@ try {
     if (Test-Path $installerSourceRoot) {
         Remove-Item -LiteralPath $installerSourceRoot -Recurse -Force
     }
-    Write-Host "安装包构建完成：$(Join-Path $distRoot 'installer\小程序工具安装包.exe')"
+    Write-Host "安装包构建完成：$(Join-Path $distRoot 'installer\小程序工具.exe')"
 }
 finally {
     Pop-Location

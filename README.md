@@ -26,6 +26,12 @@ python -m pip install -r requirements.txt
 
 ## 安装包构建依赖
 
+先安装构建依赖：
+
+```powershell
+python -m pip install -r requirements-build.txt
+```
+
 项目打安装包时只使用项目目录内的便携版 Inno Setup 编译器，不依赖系统安装版。
 
 固定路径：
@@ -39,6 +45,8 @@ python -m pip install -r requirements.txt
 ```powershell
 pwsh ./scripts/build_installer.ps1 -Clean
 ```
+
+如果本机缺少 `PyInstaller`，构建脚本会直接报错并提示安装 `requirements-build.txt`。
 
 ## 启动桌面程序
 
@@ -116,4 +124,13 @@ python desktop_py_cli.py notify
 
 ```powershell
 python -m unittest discover -s py_tests -v
+```
+
+## 推荐本地交付流程
+
+```powershell
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-build.txt
+python -m unittest discover -s py_tests -v
+pwsh ./scripts/build_installer.ps1 -Clean
 ```

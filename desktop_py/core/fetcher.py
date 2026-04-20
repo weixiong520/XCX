@@ -1,38 +1,45 @@
 from __future__ import annotations
 
-import json
 import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
-from urllib.parse import parse_qs, urlencode, urlparse
 
 from desktop_py.core.browser_runtime import configure_playwright_environment
+
 configure_playwright_environment()
 
 from playwright.sync_api import BrowserContext, Locator, Page, Response, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
-from desktop_py.core.models import AccountConfig, FetchResult
-from desktop_py.core.parser import convert_timestamp, extract_labeled_datetime
-from desktop_py.core.store import account_output_dir, validate_shared_browser_profile_dir
-
-
-class FetchError(RuntimeError):
-    """抓取失败。"""
-
-
-class CancelledError(RuntimeError):
-    """后台任务已取消。"""
-
-
-SWITCH_ACCOUNT_LIST_RETRY_LIMIT = 3
-BUSINESS_IFRAME_SELECTORS = (
-    "#js_iframe",
-    "iframe[src*='gameFeedback']",
-    "iframe[src*='refund']",
-    "iframe",
+from desktop_py.core.fetcher_page_strategy import (
+    build_detail_result,
+    build_empty_refund_result,
+    is_empty_refund_list,
+    open_feedback_page,
+    register_response_capture,
+    resolve_frame_locator,
 )
+from desktop_py.core.fetcher_support import (
+    BUSINESS_IFRAME_SELECTORS,
+    SWITCH_ACCOUNT_LIST_RETRY_LIMIT,
+    CancelledError,
+    FetchError,
+    _capture_response_payload,
+    _close_context_and_browser,
+    _close_page,
+    _fallback_from_responses,
+    _log,
+    build_feedback_url,
+    business_iframe_selector,
+    create_browser_context,
+    safe_page_content,
+    wait_for_current_account_name as wait_for_current_account_name_impl,
+    wait_for_iframe_ready,
+    wait_for_url_contains,
+    wait_or_cancel,
+)
+from desktop_py.core.models import AccountConfig, FetchResult
+from desktop_py.core.store import account_output_dir, validate_shared_browser_profile_dir
 
 
 def find_switch_entry(page: Page) -> Locator | None:
@@ -81,196 +88,19 @@ def _maybe_expand_account_menu(page: Page) -> None:
                 continue
 
 
-def wait_for_url_contains(
-    page: Page,
-    keywords: tuple[str, ...],
-    timeout_ms: int = 5000,
-    is_cancelled: callable | None = None,
-) -> bool:
-    deadline = time.monotonic() + (timeout_ms / 1000)
-    while time.monotonic() < deadline:
-        current_url = page.url
-        if any(keyword in current_url for keyword in keywords):
-            return True
-        wait_or_cancel(page, 200, is_cancelled)
-    return any(keyword in page.url for keyword in keywords)
-
-
 def wait_for_current_account_name(
     page: Page,
     expected_name: str,
     timeout_ms: int = 5000,
     is_cancelled: callable | None = None,
 ) -> str:
-    deadline = time.monotonic() + (timeout_ms / 1000)
-    while time.monotonic() < deadline:
-        actual_name = extract_current_account_name(page)
-        if actual_name:
-            if actual_name == expected_name:
-                return actual_name
-        wait_or_cancel(page, 250, is_cancelled)
-    return extract_current_account_name(page)
-
-
-def business_iframe_selector(page: Page) -> str:
-    for selector in BUSINESS_IFRAME_SELECTORS:
-        try:
-            if page.locator(selector).count() > 0:
-                return selector
-        except Exception:
-            continue
-    return ""
-
-
-def wait_for_iframe_ready(page: Page, timeout_ms: int = 5000, is_cancelled: callable | None = None) -> bool:
-    deadline = time.monotonic() + (timeout_ms / 1000)
-    while time.monotonic() < deadline:
-        selector = business_iframe_selector(page)
-        if not selector:
-            wait_or_cancel(page, 200, is_cancelled)
-            continue
-        iframe = page.locator(selector)
-        if iframe.count() > 0:
-            try:
-                handle = iframe.element_handle()
-                if handle is not None:
-                    frame = handle.content_frame()
-                    if frame is not None and frame.url and frame.url != "about:blank":
-                        try:
-                            frame.wait_for_load_state("domcontentloaded", timeout=1000)
-                        except Exception:
-                            pass
-                        try:
-                            frame.wait_for_load_state("networkidle", timeout=1000)
-                        except Exception:
-                            pass
-                        body = frame.locator("body")
-                        body_text = (body.text_content(timeout=500) or "").strip()
-                        body_html = (body.inner_html(timeout=500) or "").strip()
-                        if any(token in body_text for token in ("退款申请", "处理截止时间", "处理", "暂无内容")):
-                            return True
-                        if any(token in body_html for token in ("退款申请", "处理截止时间", "处理", "暂无内容")):
-                            return True
-                        if body_text and not body_text.startswith("document.getElementById("):
-                            return True
-            except Exception:
-                pass
-        wait_or_cancel(page, 200, is_cancelled)
-    return False
-
-
-def wait_or_cancel(page: Page, timeout_ms: int, is_cancelled: callable | None = None) -> None:
-    if is_cancelled is not None and is_cancelled():
-        raise CancelledError("任务已取消")
-    page.wait_for_timeout(timeout_ms)
-    if is_cancelled is not None and is_cancelled():
-        raise CancelledError("任务已取消")
-
-
-def _is_navigation_content_error(error: Exception) -> bool:
-    message = str(error).lower()
-    return "page.content" in message and ("navigating" in message or "changing the content" in message)
-
-
-def safe_page_content(page: Page, timeout_ms: int = 3000) -> str:
-    deadline = time.monotonic() + (timeout_ms / 1000)
-    last_error = None
-    try:
-        page.wait_for_load_state("domcontentloaded", timeout=min(timeout_ms, 1500))
-    except Exception:
-        pass
-    while time.monotonic() < deadline:
-        try:
-            return page.content()
-        except Exception as exc:
-            last_error = exc
-            if _is_navigation_content_error(exc):
-                try:
-                    page.wait_for_load_state("domcontentloaded", timeout=1000)
-                except Exception:
-                    pass
-                try:
-                    page.wait_for_load_state("networkidle", timeout=1000)
-                except Exception:
-                    pass
-                page.wait_for_timeout(300)
-                continue
-            page.wait_for_timeout(200)
-    if last_error is not None:
-        raise last_error
-    return page.content()
-
-
-def _fallback_from_responses(responses: list[Any]) -> str:
-    candidates: list[tuple[int, str]] = []
-
-    def visit(value: Any, path: str) -> None:
-        if isinstance(value, dict):
-            for key, item in value.items():
-                next_path = f"{path}.{key}" if path else key
-                visit(item, next_path)
-            return
-
-        if isinstance(value, list):
-            for index, item in enumerate(value):
-                next_path = f"{path}[{index}]"
-                visit(item, next_path)
-            return
-
-        if value is None:
-            return
-
-        text = str(value).strip()
-        if not text:
-            return
-
-        normalized = convert_timestamp(text)
-        matched = re.search(r"20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}(?:[日\sT]*\d{1,2}:\d{2}(?::\d{2})?)?", normalized)
-        if not matched:
-            return
-
-        path_lower = path.lower()
-        score = 0
-        if "appeal_deadline_time" in path_lower:
-            score = 100
-        elif "deadline_time" in path_lower:
-            score = 95
-        elif "deadline" in path_lower:
-            score = 90
-
-        if score > 0:
-            candidates.append((score, matched.group(0)))
-
-    visit(responses, "$")
-    if not candidates:
-        return ""
-    return max(candidates, key=lambda item: item[0])[1]
-
-
-def _capture_response_payload(response: Response) -> Any | None:
-    content_type = (response.headers.get("content-type") or "").lower()
-    if not any(keyword in content_type for keyword in ("json", "javascript", "text")):
-        return None
-
-    try:
-        text = response.text()
-    except Exception:
-        return None
-
-    if not text.strip():
-        return None
-
-    try:
-        body: Any = json.loads(text)
-    except Exception:
-        body = text[:3000]
-
-    return {
-        "url": response.url,
-        "status": response.status,
-        "content_type": content_type,
-        "body": body,
-    }
+    return wait_for_current_account_name_impl(
+        page,
+        expected_name,
+        timeout_ms=timeout_ms,
+        is_cancelled=is_cancelled,
+        extract_current_account_name_fn=extract_current_account_name,
+    )
 
 
 def should_retry_switch_from_home(current_url: str, home_url: str, has_switch_entry: bool) -> bool:
@@ -324,10 +154,8 @@ def extract_current_account_name(page: Page) -> str:
         html = safe_page_content(page, timeout_ms=5000)
     except Exception:
         html = ""
-    matched = None
-    try:
-        import re
 
+    try:
         matched = re.search(r'"nickName":"([^"]+)"', html)
         if matched:
             return matched.group(1).strip()
@@ -335,30 +163,17 @@ def extract_current_account_name(page: Page) -> str:
         pass
 
     try:
-        current_names = page.locator(".switch_account_dialog .account_item .current_login").locator("xpath=ancestor::div[contains(@class, 'account_item')]").locator(".account_name")
+        current_names = (
+            page.locator(".switch_account_dialog .account_item .current_login")
+            .locator("xpath=ancestor::div[contains(@class, 'account_item')]")
+            .locator(".account_name")
+        )
         if current_names.count():
             return (current_names.first.text_content() or "").strip()
     except Exception:
         pass
 
     return ""
-
-
-def build_feedback_url(page_url: str) -> str:
-    parsed = urlparse(page_url)
-    query = parse_qs(parsed.query)
-    token = (query.get("token") or [""])[0]
-    if not token:
-        raise FetchError("当前后台地址中未找到有效 token，无法自动构造反馈页链接。")
-    return "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?" + urlencode(
-        {
-            "action": "plugin_redirect",
-            "plugin_uin": "1010",
-            "selected": "2",
-            "token": token,
-            "lang": "zh_CN",
-        }
-    )
 
 
 def save_login_state(
@@ -444,7 +259,6 @@ def switch_to_account(page: Page, account_name: str, home_url: str = "", logger:
     open_switch_account_dialog(page)
 
     account_items = wait_for_switch_account_items(page, ".switch_account_dialog .account_item", logger)
-
     account_meta = account_items.evaluate_all(
         """
         elements => elements.map(el => ({
@@ -574,56 +388,7 @@ def fetch_switchable_accounts(
 
 
 def resolve_bootstrap_url(account: AccountConfig, output_dir: Path) -> str:
-    # 反馈页 token 容易过期；统一从后台首页进入，切换账号后再生成最新反馈页链接。
     return account.home_url
-
-
-def create_browser_context(playwright, account: AccountConfig, headless: bool, profile_dir: str = ""):
-    normalized_profile_dir = validate_shared_browser_profile_dir(profile_dir) if profile_dir.strip() else ""
-    if normalized_profile_dir:
-        context = playwright.chromium.launch_persistent_context(
-            user_data_dir=normalized_profile_dir,
-            headless=headless,
-            viewport={"width": 1440, "height": 1200},
-        )
-        return None, context
-
-    browser = playwright.chromium.launch(headless=headless)
-    context = browser.new_context(storage_state=str(account.state_path), viewport={"width": 1440, "height": 1200})
-    return browser, context
-
-
-def _close_page(page) -> None:
-    close = getattr(page, "close", None)
-    if callable(close):
-        close()
-
-
-def _close_context_and_browser(context, browser, state_path: Path | None = None, persist_state: bool = False) -> None:
-    context_error: Exception | None = None
-    if persist_state and state_path is not None:
-        try:
-            context.storage_state(path=str(state_path), indexed_db=True)
-        except Exception as exc:
-            context_error = exc
-
-    try:
-        context.close()
-    except Exception as exc:
-        if context_error is None:
-            context_error = exc
-
-    browser_error: Exception | None = None
-    if browser:
-        try:
-            browser.close()
-        except Exception as exc:
-            browser_error = exc
-
-    if context_error is not None:
-        raise context_error
-    if browser_error is not None:
-        raise browser_error
 
 
 def _fetch_account_in_page(
@@ -635,14 +400,7 @@ def _fetch_account_in_page(
     is_cancelled: callable | None = None,
 ) -> FetchResult:
     output_dir = account_output_dir(account.name)
-    captures: list[Any] = []
-
-    def handle_response(response: Response) -> None:
-        capture = _capture_response_payload(response)
-        if capture is not None:
-            captures.append(capture)
-
-    page.on("response", handle_response)
+    captures = register_response_capture(page, _capture_response_payload)
 
     bootstrap_url = resolve_bootstrap_url(account, output_dir)
     page.goto(bootstrap_url, wait_until="domcontentloaded", timeout=60000)
@@ -659,84 +417,51 @@ def _fetch_account_in_page(
     else:
         _log(logger, f"账号 {account.name} 已处于当前会话，跳过切换步骤。")
 
-    feedback_url = build_feedback_url(page.url)
-    _log(logger, f"账号 {account.name} 自动生成反馈页链接：{feedback_url}")
-    page.goto(feedback_url, wait_until="domcontentloaded", timeout=60000)
-    wait_for_iframe_ready(page, timeout_ms=5000, is_cancelled=is_cancelled)
-    iframe_selector = business_iframe_selector(page)
-
-    if not iframe_selector:
-        html = safe_page_content(page)
-        (output_dir / "page.html").write_text(html, encoding="utf-8")
-        raise FetchError("页面未出现业务 iframe，可能是链接失效、无权限或登录态失效。")
-
-    frame_locator = page.frame_locator(iframe_selector)
-
-    list_text = frame_locator.locator("body").text_content(timeout=15000) or ""
-    if "退款申请(0)" in list_text or "暂无内容" in list_text:
-        page_html = safe_page_content(page)
-        frame_html = frame_locator.locator("body").inner_html(timeout=15000)
-        (output_dir / "page.html").write_text(page_html, encoding="utf-8")
-        (output_dir / "iframe.html").write_text(frame_html, encoding="utf-8")
-        (output_dir / "iframe.txt").write_text(list_text, encoding="utf-8")
-        (output_dir / "responses.json").write_text(json.dumps(captures, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        actual_account_name = extract_current_account_name(page)
-        if profile_dir.strip():
-            state_path = Path(account.state_path)
-            state_path.parent.mkdir(parents=True, exist_ok=True)
-            context.storage_state(path=str(state_path), indexed_db=True)
-        result = FetchResult(
-            account_name=account.name,
-            ok=True,
-            actual_account_name=actual_account_name,
-            deadline_text="",
-            deadline_source="",
-            matched_path="",
-            page_url=feedback_url,
-            note="当前账号无待处理申请。"
-        )
-        (output_dir / "result.json").write_text(json.dumps(result.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        _log(logger, f"账号 {account.name} 当前无待处理申请。")
-        return result
-
-    action_locator = frame_locator.get_by_text("处理", exact=True)
-    if action_locator.count():
-        action_locator.last.click(timeout=10000)
-        page.wait_for_timeout(800)
-
-    frame_text = frame_locator.locator("body").text_content(timeout=15000) or ""
-    frame_html = frame_locator.locator("body").inner_html(timeout=15000)
-    deadline_text = extract_labeled_datetime(frame_text, "处理截止时间")
-    actual_account_name = extract_current_account_name(page)
-    if not deadline_text:
-        deadline_text = _fallback_from_responses(captures)
-
-    page_html = safe_page_content(page)
-    (output_dir / "page.html").write_text(page_html, encoding="utf-8")
-    (output_dir / "iframe.html").write_text(frame_html, encoding="utf-8")
-    (output_dir / "iframe.txt").write_text(frame_text, encoding="utf-8")
-    (output_dir / "responses.json").write_text(json.dumps(captures, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-    if not deadline_text:
-        raise FetchError("未在详情页文本中提取到处理截止时间。")
-
-    if profile_dir.strip():
-        state_path = Path(account.state_path)
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-        context.storage_state(path=str(account.state_path), indexed_db=True)
-    result = FetchResult(
-        account_name=account.name,
-        ok=True,
-        actual_account_name=actual_account_name,
-        deadline_text=deadline_text,
-        deadline_source="iframe-label",
-        matched_path="$iframeText.处理截止时间",
-        page_url=feedback_url,
-        note="已完成详情页抓取。"
+    feedback_url = open_feedback_page(
+        page,
+        account=account,
+        logger=logger,
+        build_feedback_url_fn=build_feedback_url,
+        wait_for_iframe_ready_fn=wait_for_iframe_ready,
+        is_cancelled=is_cancelled,
     )
-    (output_dir / "result.json").write_text(json.dumps(result.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    _log(logger, f"账号 {account.name} 抓取成功，处理截止时间：{deadline_text}")
-    return result
+    frame_locator = resolve_frame_locator(
+        page,
+        output_dir=output_dir,
+        business_iframe_selector_fn=business_iframe_selector,
+        safe_page_content_fn=safe_page_content,
+    )
+    list_text = frame_locator.locator("body").text_content(timeout=15000) or ""
+
+    if is_empty_refund_list(list_text):
+        return build_empty_refund_result(
+            page=page,
+            context=context,
+            account=account,
+            output_dir=output_dir,
+            frame_locator=frame_locator,
+            list_text=list_text,
+            captures=captures,
+            feedback_url=feedback_url,
+            profile_dir=profile_dir,
+            logger=logger,
+            safe_page_content_fn=safe_page_content,
+            extract_current_account_name_fn=extract_current_account_name,
+        )
+
+    return build_detail_result(
+        page=page,
+        context=context,
+        account=account,
+        output_dir=output_dir,
+        frame_locator=frame_locator,
+        captures=captures,
+        feedback_url=feedback_url,
+        profile_dir=profile_dir,
+        logger=logger,
+        safe_page_content_fn=safe_page_content,
+        extract_current_account_name_fn=extract_current_account_name,
+    )
 
 
 def fetch_account(
@@ -797,14 +522,7 @@ def fetch_accounts_batch(
                         break
                     page = context.new_page()
                     try:
-                        result = _fetch_account_in_page(
-                            page,
-                            context,
-                            account,
-                            logger,
-                            normalized_profile_dir,
-                            is_cancelled,
-                        )
+                        result = _fetch_account_in_page(page, context, account, logger, normalized_profile_dir, is_cancelled)
                     except CancelledError:
                         break
                     except Exception as exc:
@@ -856,8 +574,3 @@ def keep_alive_account_state(account: AccountConfig, logger: callable | None = N
     valid = validate_account_state(account, logger, profile_dir)
     _log(logger, f"账号 {account.name} 静默保活{'成功' if valid else '失败'}。")
     return valid
-
-
-def _log(logger: callable | None, message: str) -> None:
-    if logger:
-        logger(message)
