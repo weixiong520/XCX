@@ -13,6 +13,9 @@
 #ifndef MySourceDir
   #define MySourceDir "..\build\installer-source\小程序工具"
 #endif
+#ifndef MyOutputBaseFilename
+  #define MyOutputBaseFilename "小程序工具"
+#endif
 
 [Setup]
 AppId={{D2FF7E71-2A97-4F97-AB7B-4F1EA1A5B1F2}
@@ -24,7 +27,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 OutputDir=..\dist\installer
-OutputBaseFilename=小程序工具
+OutputBaseFilename={#MyOutputBaseFilename}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

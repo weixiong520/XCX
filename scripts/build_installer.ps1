@@ -56,6 +56,7 @@ $installerSourceRoot = Join-Path $projectRoot "build\installer-source"
 $appName = "小程序工具"
 $installerSourceDir = Join-Path $installerSourceRoot $appName
 $installerExeName = "$appName.exe"
+$outputBaseFilename = if ($IncludeOfflineChromium) { "$appName-离线版" } else { "$appName-标准版" }
 $innoCompiler = Resolve-InnoCompilerPath -ProjectRoot $projectRoot
 Assert-PyInstallerAvailable
 $offlineRuntimeSource = if ($IncludeOfflineChromium) {
@@ -132,14 +133,14 @@ try {
         Copy-Item -LiteralPath $offlineRuntimeSource -Destination $offlineRuntimeTarget -Recurse -Force
     }
 
-    & $innoCompiler "/DMySourceDir=$installerSourceDir" "/DMyAppExeName=$installerExeName" $installerScript
+    & $innoCompiler "/DMySourceDir=$installerSourceDir" "/DMyAppExeName=$installerExeName" "/DMyOutputBaseFilename=$outputBaseFilename" $installerScript
     if (Test-Path $installerSourceRoot) {
         Remove-Item -LiteralPath $installerSourceRoot -Recurse -Force
     }
     if ($IncludeOfflineChromium) {
-        Write-Host "离线版安装包构建完成：$(Join-Path $distRoot 'installer\小程序工具.exe')"
+        Write-Host "离线版安装包构建完成：$(Join-Path $distRoot "installer\$outputBaseFilename.exe")"
     } else {
-        Write-Host "标准版安装包构建完成：$(Join-Path $distRoot 'installer\小程序工具.exe')"
+        Write-Host "标准版安装包构建完成：$(Join-Path $distRoot "installer\$outputBaseFilename.exe")"
     }
 }
 finally {
