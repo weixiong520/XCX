@@ -27,15 +27,23 @@ def ensure_browser_runtime(app: QApplication) -> bool:
 
     loop = QEventLoop()
     result: dict[str, object] = {"ok": False, "output": "未获取到安装日志。"}
-    thread = TaskThread(lambda log: install_playwright_browsers(log))
-    thread.message.connect(
-        lambda message: progress.setLabelText(f"首次启动，正在安装 Chromium 浏览器资源，请稍候。\n\n{message}")
+    thread = TaskThread()
+    thread.task_message.connect(
+        lambda _task, message: progress.setLabelText(f"首次启动，正在安装 Chromium 浏览器资源，请稍候。\n\n{message}")
     )
-    thread.succeeded.connect(lambda payload: result.update({"ok": bool(payload[0]), "output": payload[1]}))
-    thread.succeeded.connect(lambda _payload: loop.quit())
-    thread.failed.connect(lambda message: result.update({"ok": False, "output": message}))
-    thread.failed.connect(lambda _message: loop.quit())
-    thread.finished.connect(thread.deleteLater)
+    thread.task_succeeded.connect(lambda _task, payload: result.update({"ok": bool(payload[0]), "output": payload[1]}))
+    thread.task_succeeded.connect(lambda _task, _payload: loop.quit())
+    thread.task_failed.connect(lambda _task, message: result.update({"ok": False, "output": message}))
+    thread.task_failed.connect(lambda _task, _message: loop.quit())
+    thread.task_finished.connect(lambda _task: thread.deleteLater())
+    thread.enqueue(
+        job_builder=lambda log: install_playwright_browsers(log),
+        on_success=lambda _result: None,
+        emit_log=True,
+        emit_failure_log=False,
+        update_status=False,
+        on_progress=None,
+    )
     QTimer.singleShot(0, thread.start)
     loop.exec()
 
