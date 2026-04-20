@@ -487,7 +487,7 @@ def run_keep_alive(window, *, keep_alive_account_state_fn) -> None:
     if window._threads:
         window.append_log("静默保活已跳过：当前存在后台任务。")
         return
-    account = window._account_for_keep_alive()
+    account = account_for_keep_alive(window)
     if account is None:
         window.append_log("静默保活已跳过：未配置主账号。")
         return

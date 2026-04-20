@@ -45,6 +45,11 @@ python -m pip install -r requirements.txt
    - `ffmpeg-*`
 4. 首次启动前确认程序运行目录具备这些资源，避免再触发在线下载
 
+### 标准版与离线版选择建议
+
+- **标准版**：适合办公网络或常规开发环境，优点是安装包更小
+- **离线版**：适合内网、弱网、无法联网终端，优点是交付更稳定
+
 ## 安装包构建依赖
 
 先安装构建依赖：
@@ -68,6 +73,19 @@ pwsh ./scripts/build_installer.ps1 -Clean
 ```
 
 如果本机缺少 `PyInstaller`，构建脚本会直接报错并提示安装 `requirements-build.txt`。
+
+### 构建离线版安装包
+
+如果需要离线版，请先在项目根目录准备完整的 `ms-playwright/`，然后执行：
+
+```powershell
+pwsh ./scripts/build_installer.ps1 -Clean -IncludeOfflineChromium
+```
+
+说明：
+
+- **标准版**：不内置 Chromium，首次启动在线下载
+- **离线版**：安装包内预置 `ms-playwright/`，首次启动不再依赖联网下载
 
 ## 启动桌面程序
 
@@ -187,6 +205,12 @@ ruff format --check .
 ruff check .
 ```
 
+### 类型检查试点
+
+```powershell
+python -m mypy
+```
+
 ## 推荐本地交付流程
 
 ```powershell
@@ -194,6 +218,7 @@ python -m pip install -r requirements.txt
 python -m pip install -r requirements-build.txt
 ruff format --check .
 ruff check .
+python -m mypy
 python -m unittest discover -s py_tests -v
 pwsh ./scripts/build_installer.ps1 -Clean
 ```

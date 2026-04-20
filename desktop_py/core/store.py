@@ -5,6 +5,7 @@ import os
 import sys
 from dataclasses import fields
 from pathlib import Path
+from typing import Any, cast
 
 from desktop_py.core.models import AccountConfig, AppSettings, FetchResult
 
@@ -39,7 +40,7 @@ ACCOUNTS_FILE = DATA_DIR / "accounts.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 
 
-def read_json_file(path: Path) -> object:
+def read_json_file(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
@@ -109,7 +110,7 @@ def ensure_runtime_dirs() -> None:
 
 def load_accounts() -> list[AccountConfig]:
     ensure_runtime_dirs()
-    data = read_json_file(ACCOUNTS_FILE)
+    data = cast(list[dict[str, Any]], read_json_file(ACCOUNTS_FILE))
     return [AccountConfig(**item) for item in data]
 
 
@@ -122,7 +123,7 @@ def save_accounts(accounts: list[AccountConfig]) -> None:
 
 def load_settings() -> AppSettings:
     ensure_runtime_dirs()
-    raw = read_json_file(SETTINGS_FILE)
+    raw = cast(dict[str, Any], read_json_file(SETTINGS_FILE))
     allowed = {item.name for item in fields(AppSettings)}
     filtered = {key: value for key, value in raw.items() if key in allowed}
     return AppSettings(**filtered)
@@ -152,9 +153,23 @@ def account_output_dir(account_name: str) -> Path:
     return target
 
 
+def account_output_file(account_name: str, filename: str) -> Path:
+    return account_output_dir(account_name) / filename
+
+
+def write_account_output_text(account_name: str, filename: str, content: str) -> None:
+    account_output_file(account_name, filename).write_text(content, encoding="utf-8")
+
+
+def write_account_output_json(account_name: str, filename: str, payload: object) -> None:
+    account_output_file(account_name, filename).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def write_fetch_result(account_name: str, result: FetchResult, extra: dict | None = None) -> None:
-    target = account_output_dir(account_name)
     payload = result.to_dict()
     if extra:
         payload["extra"] = extra
-    (target / "result.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_account_output_json(account_name, "result.json", payload)

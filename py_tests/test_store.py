@@ -6,6 +6,7 @@ from unittest.mock import patch
 from desktop_py.core.models import AccountConfig
 from desktop_py.core.store import (
     SHARED_BROWSER_PROFILE_DIR_NAME,
+    account_output_file,
     account_state_path,
     load_accounts,
     load_settings,
@@ -13,6 +14,8 @@ from desktop_py.core.store import (
     runtime_root,
     save_settings,
     validate_shared_browser_profile_dir,
+    write_account_output_json,
+    write_account_output_text,
 )
 
 
@@ -173,6 +176,32 @@ class StoreTestCase(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "父目录必须是文件夹"):
                 prepare_shared_browser_profile_dir(str(file_path))
+
+    def test_account_output_file_uses_safe_account_dir(self):
+        path = account_output_file("账号 A-1", "result.json")
+
+        self.assertTrue(
+            str(path).endswith("output\\desktop_py\\账号_A_1\\result.json")
+            or str(path).endswith("output/desktop_py/账号_A_1/result.json")
+        )
+
+    def test_write_account_output_text_creates_named_file(self):
+        with TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir) / "output"
+            with patch("desktop_py.core.store.PY_OUTPUT_DIR", output_root):
+                write_account_output_text("测试账号", "note.txt", "内容")
+
+                target = output_root / "测试账号" / "note.txt"
+                self.assertEqual(target.read_text(encoding="utf-8"), "内容")
+
+    def test_write_account_output_json_creates_named_file(self):
+        with TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir) / "output"
+            with patch("desktop_py.core.store.PY_OUTPUT_DIR", output_root):
+                write_account_output_json("测试账号", "payload.json", {"ok": True})
+
+                target = output_root / "测试账号" / "payload.json"
+                self.assertIn('"ok": true', target.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

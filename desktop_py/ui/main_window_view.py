@@ -19,6 +19,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from desktop_py.ui.account_presenter import (
+    deadline_tooltip_text,
+    display_account_name,
+    display_deadline_text,
+    display_result_text,
+)
+
 
 def build_ui(window, hover_table_cls, row_highlight_delegate_cls) -> None:
     central = QWidget(window)
@@ -478,10 +485,10 @@ def refresh_table(window) -> None:
     window.table.setRowCount(len(window.accounts))
     for row, account in enumerate(window.accounts):
         values = [
-            window._display_account_name(account),
-            window._display_deadline_text(account),
+            display_account_name(account, window.settings.current_main_account_name),
+            display_deadline_text(account),
             account.last_status,
-            window._display_result_text(account),
+            display_result_text(account),
             "是" if account.enabled else "否",
         ]
         for col, value in enumerate(values):
@@ -492,7 +499,7 @@ def refresh_table(window) -> None:
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if col in {0, 1, 3} and value:
-                item.setToolTip(window._deadline_tooltip_text(account) if col == 1 else value)
+                item.setToolTip(deadline_tooltip_text(account) if col == 1 else value)
             window.table.setItem(row, col, item)
     target_row = -1
     if selected_account_name:

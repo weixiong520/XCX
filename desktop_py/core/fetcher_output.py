@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+from desktop_py.core.store import write_account_output_json, write_account_output_text
 
 
 def write_fetch_artifacts(
-    output_dir: Path, *, page_html: str, frame_html: str, frame_text: str, captures: list
+    account_name: str, *, page_html: str, frame_html: str, frame_text: str, captures: list
 ) -> None:
-    (output_dir / "page.html").write_text(page_html, encoding="utf-8")
-    (output_dir / "iframe.html").write_text(frame_html, encoding="utf-8")
-    (output_dir / "iframe.txt").write_text(frame_text, encoding="utf-8")
-    (output_dir / "responses.json").write_text(
-        json.dumps(captures, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    write_account_output_text(account_name, "page.html", page_html)
+    write_account_output_text(account_name, "iframe.html", frame_html)
+    write_account_output_text(account_name, "iframe.txt", frame_text)
+    write_account_output_json(account_name, "responses.json", captures)
 
 
 def persist_storage_state(context, state_path: str) -> None:

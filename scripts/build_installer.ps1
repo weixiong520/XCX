@@ -1,5 +1,6 @@
 param(
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$IncludeOfflineChromium
 )
 
 Set-StrictMode -Version Latest
@@ -37,6 +38,18 @@ function Assert-PyInstallerAvailable {
     }
 }
 
+function Resolve-OfflineRuntimeSource {
+    param(
+        [string]$ProjectRoot
+    )
+
+    $runtimePath = Join-Path $ProjectRoot "ms-playwright"
+    if (-not (Test-Path $runtimePath)) {
+        throw "未找到离线浏览器运行时目录。请先准备项目根目录下的 ms-playwright。"
+    }
+    return $runtimePath
+}
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $distRoot = Join-Path $projectRoot "dist"
 $installerSourceRoot = Join-Path $projectRoot "build\installer-source"
@@ -45,6 +58,11 @@ $installerSourceDir = Join-Path $installerSourceRoot $appName
 $installerExeName = "$appName.exe"
 $innoCompiler = Resolve-InnoCompilerPath -ProjectRoot $projectRoot
 Assert-PyInstallerAvailable
+$offlineRuntimeSource = if ($IncludeOfflineChromium) {
+    Resolve-OfflineRuntimeSource -ProjectRoot $projectRoot
+} else {
+    ""
+}
 
 $installerScript = if ($Clean) {
     Join-Path $PSScriptRoot "installer_clean.iss"
@@ -109,11 +127,20 @@ try {
         }
     }
 
+    if ($IncludeOfflineChromium) {
+        $offlineRuntimeTarget = Join-Path $installerSourceDir "ms-playwright"
+        Copy-Item -LiteralPath $offlineRuntimeSource -Destination $offlineRuntimeTarget -Recurse -Force
+    }
+
     & $innoCompiler "/DMySourceDir=$installerSourceDir" "/DMyAppExeName=$installerExeName" $installerScript
     if (Test-Path $installerSourceRoot) {
         Remove-Item -LiteralPath $installerSourceRoot -Recurse -Force
     }
-    Write-Host "安装包构建完成：$(Join-Path $distRoot 'installer\小程序工具.exe')"
+    if ($IncludeOfflineChromium) {
+        Write-Host "离线版安装包构建完成：$(Join-Path $distRoot 'installer\小程序工具.exe')"
+    } else {
+        Write-Host "标准版安装包构建完成：$(Join-Path $distRoot 'installer\小程序工具.exe')"
+    }
 }
 finally {
     Pop-Location

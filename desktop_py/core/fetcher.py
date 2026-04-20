@@ -11,7 +11,6 @@ configure_playwright_environment()
 
 from playwright.sync_api import sync_playwright
 
-from desktop_py.core import fetcher_support as _fetcher_support
 from desktop_py.core.fetcher_page_strategy import (
     build_detail_result,
     build_empty_refund_result,
@@ -67,10 +66,6 @@ from desktop_py.core.fetcher_switching import (
 )
 from desktop_py.core.models import AccountConfig, FetchResult
 from desktop_py.core.store import account_output_dir, validate_shared_browser_profile_dir
-
-CancelledError = _fetcher_support.CancelledError
-FetchError = _fetcher_support.FetchError
-_fallback_from_responses = _fetcher_support._fallback_from_responses
 
 # 稳定公开接口只包含主流程入口；
 # 其余符号继续保留在模块命名空间中，仅用于兼容现有测试和局部内部调用。

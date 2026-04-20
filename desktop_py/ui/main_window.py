@@ -39,17 +39,10 @@ from desktop_py.ui.account_dialog import AccountDialog
 from desktop_py.ui.account_presenter import (
     apply_batch_fetch_results,
     apply_fetch_result,
-    deadline_tooltip_text,
-    display_account_name,
-    display_deadline_text,
-    display_result_text,
     is_no_business_page_note,
     next_auto_fetch_push_interval_ms,
     parse_deadline_for_sort,
     sort_accounts_for_display,
-)
-from desktop_py.ui.main_window_actions_impl import (
-    account_for_keep_alive as account_for_keep_alive_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
     actual_account_name_from_note as actual_account_name_from_note_impl,
@@ -80,9 +73,6 @@ from desktop_py.ui.main_window_actions_impl import (
 )
 from desktop_py.ui.main_window_actions_impl import (
     edit_account as edit_account_impl,
-)
-from desktop_py.ui.main_window_actions_impl import (
-    entry_account as entry_account_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
     fetch_all as fetch_all_impl,
@@ -394,17 +384,8 @@ class MainWindow(QMainWindow):
     def _parse_deadline_for_sort(self, deadline_text: str) -> datetime | None:
         return parse_deadline_for_sort(deadline_text)
 
-    def _display_deadline_text(self, account: AccountConfig) -> str:
-        return display_deadline_text(account)
-
-    def _deadline_tooltip_text(self, account: AccountConfig) -> str:
-        return deadline_tooltip_text(account)
-
     def _is_no_business_page_note(self, note: str) -> bool:
         return is_no_business_page_note(note)
-
-    def _display_result_text(self, account: AccountConfig) -> str:
-        return display_result_text(account)
 
     def _show_info(self, title: str, text: str) -> None:
         MessageDialog.show_info(self, title, text)
@@ -417,12 +398,6 @@ class MainWindow(QMainWindow):
 
     def _safe_validate_account_state(self, account: AccountConfig) -> bool:
         return safe_validate_account_state_impl(self, account, validate_account_state_fn=validate_account_state)
-
-    def _entry_account(self) -> AccountConfig | None:
-        return entry_account_impl(self)
-
-    def _account_for_keep_alive(self, candidates: list[AccountConfig] | None = None) -> AccountConfig | None:
-        return account_for_keep_alive_impl(self, candidates)
 
     def selected_index(self) -> int:
         return selected_index_impl(self)
@@ -444,9 +419,6 @@ class MainWindow(QMainWindow):
 
     def _update_current_main_account(self, account_name: str) -> None:
         update_current_main_account_impl(self, account_name, save_settings_fn=save_settings)
-
-    def _display_account_name(self, account: AccountConfig) -> str:
-        return display_account_name(account, self.settings.current_main_account_name)
 
     def _reset_current_main_account_name(self) -> None:
         reset_current_main_account_name_impl(self, save_settings_fn=save_settings)

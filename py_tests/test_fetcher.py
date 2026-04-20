@@ -5,28 +5,39 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from desktop_py.core.fetcher import (
+    extract_current_account_name,
+    fetch_accounts_batch,
+    fetch_switchable_accounts,
+    keep_alive_account_state,
+    save_login_state,
+    validate_account_state,
+    wait_for_current_account_name,
+    wait_for_switch_account_items,
+)
+from desktop_py.core.fetcher_pipeline import resolve_bootstrap_url_impl as resolve_bootstrap_url
+from desktop_py.core.fetcher_support import (
     CancelledError,
     _capture_response_payload,
     _close_context_and_browser,
     _fallback_from_responses,
     build_feedback_url,
     business_iframe_selector,
-    fetch_accounts_batch,
-    fetch_switchable_accounts,
-    find_switch_entry,
-    keep_alive_account_state,
-    resolve_bootstrap_url,
     safe_page_content,
-    save_login_state,
-    should_retry_switch_from_home,
-    should_switch_account,
-    should_switch_for_account,
-    validate_account_state,
-    wait_for_current_account_name,
     wait_for_iframe_ready,
-    wait_for_switch_account_items,
     wait_for_url_contains,
     wait_or_cancel,
+)
+from desktop_py.core.fetcher_switching import (
+    find_switch_entry_impl as find_switch_entry,
+)
+from desktop_py.core.fetcher_switching import (
+    should_retry_switch_from_home_impl as should_retry_switch_from_home,
+)
+from desktop_py.core.fetcher_switching import (
+    should_switch_account_impl as should_switch_account,
+)
+from desktop_py.core.fetcher_switching import (
+    should_switch_for_account_impl as should_switch_for_account,
 )
 from desktop_py.core.models import AccountConfig
 from desktop_py.core.parser import extract_labeled_datetime
@@ -200,8 +211,6 @@ class FetcherTestCase(unittest.TestCase):
         with patch(
             "desktop_py.core.fetcher.safe_page_content", return_value=self.read_fixture("switch_account_menu.html")
         ):
-            from desktop_py.core.fetcher import extract_current_account_name
-
             self.assertEqual(extract_current_account_name(page), "主账号")
 
     def test_contract_fixture_prefers_js_iframe_selector(self):

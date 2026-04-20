@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +7,7 @@ from desktop_py.core.fetcher_output import persist_storage_state, write_fetch_ar
 from desktop_py.core.fetcher_support import FetchError, _fallback_from_responses
 from desktop_py.core.models import AccountConfig, FetchResult
 from desktop_py.core.parser import extract_labeled_datetime
+from desktop_py.core.store import write_account_output_text, write_fetch_result
 
 
 def register_response_capture(page, capture_response_payload_fn) -> list[Any]:
@@ -42,7 +42,7 @@ def resolve_frame_locator(page, *, output_dir: Path, business_iframe_selector_fn
     iframe_selector = business_iframe_selector_fn(page)
     if not iframe_selector:
         html = safe_page_content_fn(page)
-        (output_dir / "page.html").write_text(html, encoding="utf-8")
+        write_account_output_text(output_dir.name, "page.html", html)
         raise FetchError("页面未出现业务 iframe，可能是链接失效、无权限或登录态失效。")
     return page.frame_locator(iframe_selector)
 
@@ -69,7 +69,7 @@ def build_empty_refund_result(
     page_html = safe_page_content_fn(page)
     frame_html = frame_locator.locator("body").inner_html(timeout=15000)
     write_fetch_artifacts(
-        output_dir, page_html=page_html, frame_html=frame_html, frame_text=list_text, captures=captures
+        account.name, page_html=page_html, frame_html=frame_html, frame_text=list_text, captures=captures
     )
     actual_account_name = extract_current_account_name_fn(page)
     if profile_dir.strip():
@@ -84,7 +84,7 @@ def build_empty_refund_result(
         page_url=feedback_url,
         note="当前账号无待处理申请。",
     )
-    write_result(output_dir, result)
+    write_fetch_result(account.name, result)
     _log(logger, f"账号 {account.name} 当前无待处理申请。")
     return result
 
@@ -117,7 +117,7 @@ def build_detail_result(
 
     page_html = safe_page_content_fn(page)
     write_fetch_artifacts(
-        output_dir, page_html=page_html, frame_html=frame_html, frame_text=frame_text, captures=captures
+        account.name, page_html=page_html, frame_html=frame_html, frame_text=frame_text, captures=captures
     )
 
     if not deadline_text:
@@ -135,16 +135,9 @@ def build_detail_result(
         page_url=feedback_url,
         note="已完成详情页抓取。",
     )
-    write_result(output_dir, result)
+    write_fetch_result(account.name, result)
     _log(logger, f"账号 {account.name} 抓取成功，处理截止时间：{deadline_text}")
     return result
-
-
-def write_result(output_dir: Path, result: FetchResult) -> None:
-    (output_dir / "result.json").write_text(
-        json.dumps(result.to_dict(), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
 
 
 def _log(logger: callable | None, message: str) -> None:

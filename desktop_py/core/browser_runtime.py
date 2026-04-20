@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import playwright
@@ -66,7 +67,7 @@ def playwright_install_environment(target: Path) -> dict[str, str]:
     return env
 
 
-def _run_playwright_install(env: dict[str, str], logger: callable | None = None) -> tuple[bool, str]:
+def _run_playwright_install(env: dict[str, str], logger: Callable[[str], None] | None = None) -> tuple[bool, str]:
     process = subprocess.Popen(
         playwright_install_command(),
         stdout=subprocess.PIPE,
@@ -90,7 +91,7 @@ def _run_playwright_install(env: dict[str, str], logger: callable | None = None)
     return process.wait() == 0, "\n".join(lines[-40:])
 
 
-def install_playwright_browsers(logger: callable | None = None) -> tuple[bool, str]:
+def install_playwright_browsers(logger: Callable[[str], None] | None = None) -> tuple[bool, str]:
     target = configure_playwright_environment()
     target.mkdir(parents=True, exist_ok=True)
     env = playwright_install_environment(target)
