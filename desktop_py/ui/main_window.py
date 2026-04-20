@@ -246,7 +246,8 @@ BLOCKED_ACCOUNT_NAMES = {
     "叨空SSR",
 }
 
-AUTO_RENEW_INTERVAL_MS = 5 * 60 * 60 * 1000
+AUTO_RENEW_INTERVAL_MIN_MS = 2 * 60 * 60 * 1000
+AUTO_RENEW_INTERVAL_MAX_MS = 4 * 60 * 60 * 1000
 ACTUAL_ACCOUNT_PREFIX = "当前实际账号："
 
 
@@ -524,7 +525,11 @@ class MainWindow(QMainWindow):
         handle_auto_fetch_push_timeout_impl(self)
 
     def _apply_auto_renew_schedule(self) -> None:
-        apply_auto_renew_schedule_impl(self, auto_renew_interval_ms=AUTO_RENEW_INTERVAL_MS)
+        apply_auto_renew_schedule_impl(
+            self,
+            min_auto_renew_interval_ms=AUTO_RENEW_INTERVAL_MIN_MS,
+            max_auto_renew_interval_ms=AUTO_RENEW_INTERVAL_MAX_MS,
+        )
 
     def _handle_auto_renew_timeout(self) -> None:
         handle_auto_renew_timeout_impl(self)

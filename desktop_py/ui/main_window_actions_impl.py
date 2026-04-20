@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import random
+
 
 def initialize_window_state(
     window,
@@ -16,6 +19,7 @@ def initialize_window_state(
 
 
 def schedule_startup_jobs(window, *, timer_cls) -> None:
+    timer_cls.singleShot(0, window._run_auto_renew)
     timer_cls.singleShot(0, window._auto_validate_entry_account)
     timer_cls.singleShot(0, window._apply_auto_fetch_push_schedule)
     timer_cls.singleShot(0, window._apply_auto_renew_schedule)
@@ -482,9 +486,10 @@ def handle_auto_fetch_push_timeout(window) -> None:
     window._run_auto_fetch_push()
 
 
-def apply_auto_renew_schedule(window, *, auto_renew_interval_ms: int) -> None:
+def apply_auto_renew_schedule(window, *, min_auto_renew_interval_ms: int, max_auto_renew_interval_ms: int) -> None:
     window._auto_renew_timer.stop()
-    window._auto_renew_timer.start(auto_renew_interval_ms)
+    interval = random.randint(min_auto_renew_interval_ms, max_auto_renew_interval_ms)
+    window._auto_renew_timer.start(interval)
 
 
 def handle_auto_renew_timeout(window) -> None:
@@ -493,6 +498,8 @@ def handle_auto_renew_timeout(window) -> None:
 
 
 def run_auto_renew(window, *, renew_account_state_fn) -> None:
+    if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+        return
     if window._threads:
         window.append_log("自动续期已跳过：当前存在后台任务。")
         return

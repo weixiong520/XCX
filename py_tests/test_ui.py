@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 from desktop_py.core.models import AccountConfig, AppSettings, FetchResult
 from desktop_py.core.store import SHARED_BROWSER_PROFILE_DIR_NAME
 from desktop_py.ui.account_dialog import AccountDialog
-from desktop_py.ui.main_window import AUTO_RENEW_INTERVAL_MS, MainWindow
+from desktop_py.ui.main_window import AUTO_RENEW_INTERVAL_MAX_MS, AUTO_RENEW_INTERVAL_MIN_MS, MainWindow
 
 
 class UiSmokeTestCase(unittest.TestCase):
@@ -776,8 +776,42 @@ class UiSmokeTestCase(unittest.TestCase):
         mock_schedule.assert_called_once()
         mock_run.assert_called_once()
 
-    def test_auto_renew_interval_is_five_hours(self):
-        self.assertEqual(AUTO_RENEW_INTERVAL_MS, 5 * 60 * 60 * 1000)
+    def test_auto_renew_interval_uses_two_to_four_hours_range(self):
+        self.assertEqual(AUTO_RENEW_INTERVAL_MIN_MS, 2 * 60 * 60 * 1000)
+        self.assertEqual(AUTO_RENEW_INTERVAL_MAX_MS, 4 * 60 * 60 * 1000)
+
+    def test_startup_jobs_trigger_auto_renew_by_default(self):
+        from desktop_py.ui.main_window_actions_impl import schedule_startup_jobs
+
+        calls = []
+
+        class FakeTimer:
+            @staticmethod
+            def singleShot(_delay, callback):
+                calls.append(callback)
+
+        window = type(
+            "FakeWindow",
+            (),
+            {
+                "_run_auto_renew": object(),
+                "_auto_validate_entry_account": object(),
+                "_apply_auto_fetch_push_schedule": object(),
+                "_apply_auto_renew_schedule": object(),
+            },
+        )()
+
+        schedule_startup_jobs(window, timer_cls=FakeTimer)
+
+        self.assertEqual(
+            calls,
+            [
+                window._run_auto_renew,
+                window._auto_validate_entry_account,
+                window._apply_auto_fetch_push_schedule,
+                window._apply_auto_renew_schedule,
+            ],
+        )
 
     def test_handle_auto_renew_timeout_reschedules_and_runs_job(self):
         window = MainWindow()
@@ -792,22 +826,33 @@ class UiSmokeTestCase(unittest.TestCase):
         mock_schedule.assert_called_once()
         mock_run.assert_called_once()
 
-    def test_run_auto_renew_uses_entry_account(self):
+    def test_apply_auto_renew_schedule_uses_random_interval_in_range(self):
         window = MainWindow()
         self.addCleanup(window.close)
-        window.accounts = [
-            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
-            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False),
-        ]
 
-        with patch.object(window, "_run_thread") as mock_run_thread:
-            window._run_auto_renew()
+        with patch("desktop_py.ui.main_window_actions_impl.random.randint", return_value=12345678) as mock_randint:
+            window._apply_auto_renew_schedule()
 
-        mock_run_thread.assert_called_once()
-        job = mock_run_thread.call_args.args[0]
-        with patch("desktop_py.ui.main_window.renew_account_state", return_value=True) as mock_renew:
-            self.assertTrue(job(lambda _message: None))
-        self.assertEqual(mock_renew.call_args.args[0].name, "主账号")
+        mock_randint.assert_called_once_with(AUTO_RENEW_INTERVAL_MIN_MS, AUTO_RENEW_INTERVAL_MAX_MS)
+        self.assertEqual(window._auto_renew_timer.interval(), 12345678)
+
+    def test_run_auto_renew_uses_entry_account(self):
+        with patch.dict(os.environ, {"QT_QPA_PLATFORM": "windows"}):
+            window = MainWindow()
+            self.addCleanup(window.close)
+            window.accounts = [
+                AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
+                AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False),
+            ]
+
+            with patch.object(window, "_run_thread") as mock_run_thread:
+                window._run_auto_renew()
+
+            mock_run_thread.assert_called_once()
+            job = mock_run_thread.call_args.args[0]
+            with patch("desktop_py.ui.main_window.renew_account_state", return_value=True) as mock_renew:
+                self.assertTrue(job(lambda _message: None))
+            self.assertEqual(mock_renew.call_args.args[0].name, "主账号")
 
     def test_renew_selected_uses_selected_entry_account(self):
         window = MainWindow()
@@ -839,16 +884,17 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertLess(window.validate_button.x(), window.renew_button.x())
 
     def test_run_auto_renew_skips_when_background_task_exists(self):
-        window = MainWindow()
-        self.addCleanup(window.close)
-        window._threads.append(object())
-        window._update_action_buttons()
+        with patch.dict(os.environ, {"QT_QPA_PLATFORM": "windows"}):
+            window = MainWindow()
+            self.addCleanup(window.close)
+            window._threads.append(object())
+            window._update_action_buttons()
 
-        with patch.object(window, "_run_thread") as mock_run_thread:
-            window._run_auto_renew()
+            with patch.object(window, "_run_thread") as mock_run_thread:
+                window._run_auto_renew()
 
-        mock_run_thread.assert_not_called()
-        self.assertIn("当前存在后台任务", window.log_edit.toPlainText())
+            mock_run_thread.assert_not_called()
+            self.assertIn("当前存在后台任务", window.log_edit.toPlainText())
 
     def test_stop_fetch_button_enabled_when_background_task_exists(self):
         window = MainWindow()
