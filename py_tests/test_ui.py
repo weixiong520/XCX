@@ -1151,6 +1151,34 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertEqual(window.table.item(1, 2).text(), "抓取成功")
         self.assertEqual(window.table.item(1, 3).text(), "完成")
 
+    def test_mark_fetch_progress_updates_ui_even_when_save_accounts_fails(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
+            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False),
+        ]
+
+        with (
+            patch("desktop_py.ui.main_window.save_accounts", side_effect=RuntimeError("磁盘写入失败")),
+            patch("desktop_py.ui.main_window.save_settings"),
+        ):
+            window._mark_fetch_progress(
+                FetchResult(
+                    account_name="导入账号A",
+                    ok=True,
+                    actual_account_name="萌萌连消",
+                    deadline_text="2026-04-18 10:30:00",
+                    note="已完成详情页抓取。",
+                    page_url="https://example.com/detail",
+                )
+            )
+
+        self.assertEqual(window.table.item(1, 1).text(), "2026-04-18 10:30:00")
+        self.assertEqual(window.table.item(1, 2).text(), "抓取成功")
+        self.assertEqual(window.table.item(1, 3).text(), "完成")
+        self.assertIn("保存抓取结果失败", window.log_edit.toPlainText())
+
     def test_mark_fetch_progress_updates_main_account_name_immediately(self):
         window = MainWindow()
         self.addCleanup(window.close)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -98,6 +100,28 @@ PUBLIC_FETCHER_API = (
 __all__ = [
     *PUBLIC_FETCHER_API,
 ]
+
+
+def _run_blocking_fetch_call(func):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return func()
+
+    outcome: dict[str, object] = {}
+
+    def worker() -> None:
+        try:
+            outcome["result"] = func()
+        except Exception as exc:  # pragma: no cover - threaded propagation
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join()
+    if "error" in outcome:
+        raise outcome["error"]  # type: ignore[misc]
+    return outcome.get("result")
 
 
 def find_switch_entry(page: Page) -> Locator | None:
@@ -406,32 +430,36 @@ def fetch_accounts_batch(
 
 
 def validate_account_state(account: AccountConfig, logger: callable | None = None, profile_dir: str = "") -> bool:
-    return validate_account_state_impl(
-        account,
-        logger=logger,
-        profile_dir=profile_dir,
-        sync_playwright_fn=sync_playwright,
-        path_exists_fn=Path.exists,
-        validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir,
-        create_browser_context_fn=create_browser_context,
-        wait_for_url_contains_fn=wait_for_url_contains,
-        close_page_fn=_close_page,
-        close_context_and_browser_fn=_close_context_and_browser,
-        log_fn=_log,
+    return _run_blocking_fetch_call(
+        lambda: validate_account_state_impl(
+            account,
+            logger=logger,
+            profile_dir=profile_dir,
+            sync_playwright_fn=sync_playwright,
+            path_exists_fn=Path.exists,
+            validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir,
+            create_browser_context_fn=create_browser_context,
+            wait_for_url_contains_fn=wait_for_url_contains,
+            close_page_fn=_close_page,
+            close_context_and_browser_fn=_close_context_and_browser,
+            log_fn=_log,
+        )
     )
 
 
 def renew_account_state(account: AccountConfig, logger: callable | None = None, profile_dir: str = "") -> bool:
-    return renew_account_state_impl(
-        account,
-        logger=logger,
-        profile_dir=profile_dir,
-        sync_playwright_fn=sync_playwright,
-        path_exists_fn=Path.exists,
-        validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir,
-        create_browser_context_fn=create_browser_context,
-        wait_for_url_contains_fn=wait_for_url_contains,
-        close_page_fn=_close_page,
-        close_context_and_browser_fn=_close_context_and_browser,
-        log_fn=_log,
+    return _run_blocking_fetch_call(
+        lambda: renew_account_state_impl(
+            account,
+            logger=logger,
+            profile_dir=profile_dir,
+            sync_playwright_fn=sync_playwright,
+            path_exists_fn=Path.exists,
+            validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir,
+            create_browser_context_fn=create_browser_context,
+            wait_for_url_contains_fn=wait_for_url_contains,
+            close_page_fn=_close_page,
+            close_context_and_browser_fn=_close_context_and_browser,
+            log_fn=_log,
+        )
     )

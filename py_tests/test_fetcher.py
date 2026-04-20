@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 from pathlib import Path
@@ -1935,6 +1936,32 @@ class FetcherTestCase(unittest.TestCase):
                 )
 
         self.assertEqual(progress_calls, ["账号A"])
+
+    def test_validate_account_state_runs_in_helper_thread_when_asyncio_loop_exists(self):
+        account = AccountConfig(name="主账号", state_path="storage/shared.json")
+
+        async def runner():
+            with patch("desktop_py.core.fetcher.validate_account_state_impl", return_value=True) as mock_impl:
+                valid = validate_account_state(account)
+            return valid, mock_impl.call_count
+
+        valid, call_count = asyncio.run(runner())
+
+        self.assertTrue(valid)
+        self.assertEqual(call_count, 1)
+
+    def test_renew_account_state_runs_in_helper_thread_when_asyncio_loop_exists(self):
+        account = AccountConfig(name="主账号", state_path="storage/shared.json")
+
+        async def runner():
+            with patch("desktop_py.core.fetcher.renew_account_state_impl", return_value=True) as mock_impl:
+                valid = renew_account_state(account)
+            return valid, mock_impl.call_count
+
+        valid, call_count = asyncio.run(runner())
+
+        self.assertTrue(valid)
+        self.assertEqual(call_count, 1)
 
 
 if __name__ == "__main__":

@@ -562,17 +562,33 @@ def mark_fetch_progress(window, result) -> None:
 
 def mark_fetch_result(window, account, result, *, apply_fetch_result_fn, save_accounts_fn) -> None:
     current_main_account_name = apply_fetch_result_fn(account, result)
-    save_accounts_fn(window.accounts)
-    window._update_current_main_account(current_main_account_name)
     window.refresh_table()
+    try:
+        save_accounts_fn(window.accounts)
+    except Exception as exc:
+        window.append_log(f"保存抓取结果失败：{exc}")
+    try:
+        window._update_current_main_account(current_main_account_name)
+    except Exception as exc:
+        window.append_log(f"更新当前主账号失败：{exc}")
+    else:
+        window.refresh_table()
 
 
 def mark_batch_results(window, results: list, *, apply_batch_fetch_results_fn, save_accounts_fn) -> None:
     latest_actual_account_name = apply_batch_fetch_results_fn(window.accounts, results)
-    save_accounts_fn(window.accounts)
-    if latest_actual_account_name:
-        window._update_current_main_account(latest_actual_account_name)
     window.refresh_table()
+    try:
+        save_accounts_fn(window.accounts)
+    except Exception as exc:
+        window.append_log(f"保存批量抓取结果失败：{exc}")
+    if latest_actual_account_name:
+        try:
+            window._update_current_main_account(latest_actual_account_name)
+        except Exception as exc:
+            window.append_log(f"更新当前主账号失败：{exc}")
+        else:
+            window.refresh_table()
     window.append_log("批量抓取已完成。")
 
 
