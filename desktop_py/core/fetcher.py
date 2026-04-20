@@ -25,6 +25,14 @@ from desktop_py.core.fetcher_pipeline import (
     fetch_accounts_batch_impl,
     resolve_bootstrap_url_impl,
 )
+from desktop_py.core.fetcher_runtime import (
+    acquire_group_runtime,
+    invalidate_group_runtime,
+    release_group_runtime,
+    runtime_current_account_name,
+    should_invalidate_runtime,
+    update_runtime_current_account_name,
+)
 from desktop_py.core.fetcher_session import (
     keep_alive_account_state_impl,
     save_login_state_impl,
@@ -327,8 +335,12 @@ def fetch_account(
         validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir,
         create_browser_context_fn=create_browser_context,
         fetch_account_in_page_fn=_fetch_account_in_page,
-        close_page_fn=_close_page,
-        close_context_and_browser_fn=_close_context_and_browser,
+        acquire_group_runtime_fn=acquire_group_runtime,
+        release_group_runtime_fn=release_group_runtime,
+        invalidate_group_runtime_fn=invalidate_group_runtime,
+        runtime_current_account_name_fn=runtime_current_account_name,
+        update_runtime_current_account_name_fn=update_runtime_current_account_name,
+        should_invalidate_runtime_fn=should_invalidate_runtime,
     )
 
 
@@ -352,8 +364,11 @@ def fetch_accounts_batch(
         validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir,
         create_browser_context_fn=create_browser_context,
         fetch_account_in_page_fn=_fetch_account_in_page,
-        close_page_fn=_close_page,
-        close_context_and_browser_fn=_close_context_and_browser,
+        acquire_group_runtime_fn=acquire_group_runtime,
+        release_group_runtime_fn=release_group_runtime,
+        invalidate_group_runtime_fn=invalidate_group_runtime,
+        update_runtime_current_account_name_fn=update_runtime_current_account_name,
+        should_invalidate_runtime_fn=should_invalidate_runtime,
     )
 
 

@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from desktop_py.core.fetcher import (
     extract_current_account_name,
+    fetch_account,
     fetch_accounts_batch,
     fetch_switchable_accounts,
     keep_alive_account_state,
@@ -14,7 +15,10 @@ from desktop_py.core.fetcher import (
     wait_for_current_account_name,
     wait_for_switch_account_items,
 )
+from desktop_py.core.fetcher_page_strategy import register_response_capture
+from desktop_py.core.fetcher_pipeline import fetch_account_in_page_impl
 from desktop_py.core.fetcher_pipeline import resolve_bootstrap_url_impl as resolve_bootstrap_url
+from desktop_py.core.fetcher_runtime import close_all_group_runtimes
 from desktop_py.core.fetcher_support import (
     CancelledError,
     _capture_response_payload,
@@ -39,7 +43,7 @@ from desktop_py.core.fetcher_switching import (
 from desktop_py.core.fetcher_switching import (
     should_switch_for_account_impl as should_switch_for_account,
 )
-from desktop_py.core.models import AccountConfig
+from desktop_py.core.models import AccountConfig, FetchResult
 from desktop_py.core.parser import extract_labeled_datetime
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "fetcher"
@@ -180,6 +184,9 @@ class FixturePage:
 
 
 class FetcherTestCase(unittest.TestCase):
+    def tearDown(self):
+        close_all_group_runtimes()
+
     def read_fixture(self, name: str) -> str:
         return (FIXTURE_ROOT / name).read_text(encoding="utf-8")
 
@@ -587,7 +594,7 @@ class FetcherTestCase(unittest.TestCase):
         self.assertEqual(progress_calls, ["账号A", "账号B", "账号C"])
         self.assertEqual(mock_create_context.call_count, 2)
 
-    def test_fetch_accounts_batch_creates_and_closes_page_per_account(self):
+    def test_fetch_accounts_batch_creates_and_closes_single_page_per_group(self):
         accounts = [
             AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False),
             AccountConfig(name="账号B", state_path="storage/a.json", is_entry_account=False),
@@ -627,10 +634,227 @@ class FetcherTestCase(unittest.TestCase):
             mock_playwright.return_value.__enter__.return_value = object()
 
             results = fetch_accounts_batch(accounts)
+            close_all_group_runtimes()
 
         self.assertEqual([result.account_name for result in results], ["账号A", "账号B"])
-        self.assertEqual(len(created_pages), 2)
+        self.assertEqual(len(created_pages), 1)
         self.assertTrue(all(page.closed for page in created_pages))
+
+    def test_fetch_account_reuses_existing_group_runtime(self):
+        account = AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False)
+        created_pages = []
+
+        class FakePageObject:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        class FakeContext:
+            def new_page(self):
+                page = FakePageObject()
+                created_pages.append(page)
+                return page
+
+            def close(self):
+                return None
+
+        fake_context = FakeContext()
+        fake_browser = type("FakeBrowser", (), {"close": lambda self: None})()
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context", return_value=(fake_browser, fake_context)
+            ) as mock_create_context,
+            patch(
+                "desktop_py.core.fetcher._fetch_account_in_page",
+                side_effect=lambda page, context, account, logger, profile_dir, is_cancelled=None: FetchResult(
+                    account_name=account.name,
+                    ok=True,
+                    actual_account_name=account.name,
+                ),
+            ) as mock_fetch,
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            first = fetch_account(account, 0)
+            second = fetch_account(account, 0)
+            close_all_group_runtimes()
+
+        self.assertTrue(first.ok)
+        self.assertTrue(second.ok)
+        self.assertEqual(mock_create_context.call_count, 1)
+        self.assertEqual(mock_fetch.call_count, 2)
+        self.assertEqual(len(created_pages), 1)
+        self.assertTrue(created_pages[0].closed)
+
+    def test_fetch_account_and_batch_share_group_runtime(self):
+        account = AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False)
+        created_pages = []
+
+        class FakePageObject:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        class FakeContext:
+            def new_page(self):
+                page = FakePageObject()
+                created_pages.append(page)
+                return page
+
+            def close(self):
+                return None
+
+        fake_context = FakeContext()
+        fake_browser = type("FakeBrowser", (), {"close": lambda self: None})()
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context", return_value=(fake_browser, fake_context)
+            ) as mock_create_context,
+            patch(
+                "desktop_py.core.fetcher._fetch_account_in_page",
+                side_effect=lambda page, context, account, logger, profile_dir, is_cancelled=None: FetchResult(
+                    account_name=account.name,
+                    ok=True,
+                    actual_account_name=account.name,
+                ),
+            ),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            single_result = fetch_account(account, 0)
+            batch_results = fetch_accounts_batch([account])
+            close_all_group_runtimes()
+
+        self.assertTrue(single_result.ok)
+        self.assertEqual([item.account_name for item in batch_results], ["账号A"])
+        self.assertEqual(mock_create_context.call_count, 1)
+        self.assertEqual(len(created_pages), 1)
+        self.assertTrue(created_pages[0].closed)
+
+    def test_register_response_capture_removes_listener_on_cleanup(self):
+        events: dict[str, list] = {}
+
+        class ListenerPage:
+            def on(self, event_name, callback):
+                events.setdefault(event_name, []).append(callback)
+
+            def remove_listener(self, event_name, callback):
+                events.setdefault(event_name, []).remove(callback)
+
+        page = ListenerPage()
+
+        captures, cleanup = register_response_capture(page, lambda response: {"url": response})
+
+        self.assertEqual(len(events["response"]), 1)
+        events["response"][0]("https://example.com/api")
+        self.assertEqual(captures, [{"url": "https://example.com/api"}])
+
+        cleanup()
+
+        self.assertEqual(events["response"], [])
+
+    def test_fetch_account_in_page_uses_cached_current_account_name_without_reloading_home(self):
+        calls = {
+            "extract": 0,
+            "switch": 0,
+            "feedback": 0,
+            "cleanup": 0,
+        }
+
+        class CachedPage:
+            def __init__(self):
+                self.url = (
+                    "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&token=1"
+                )
+                self._current_account_name_cache = "账号A"
+                self.goto_calls: list[str] = []
+
+            def goto(self, url, wait_until=None, timeout=None):
+                self.goto_calls.append(url)
+                self.url = url
+
+        test_case = self
+
+        class FakeFrameLocator:
+            def locator(self, selector):
+                test_case.assertEqual(selector, "body")
+
+                class FakeBodyLocator:
+                    def text_content(self, timeout=None):
+                        return "退款申请(0)"
+
+                return FakeBodyLocator()
+
+        page = CachedPage()
+        account = AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False)
+
+        def fake_register_response_capture(_page, _capture):
+            return [], lambda: calls.__setitem__("cleanup", calls["cleanup"] + 1)
+
+        def fake_extract_current_account_name(_page):
+            calls["extract"] += 1
+            return "账号A"
+
+        def fake_switch_to_account(_page, _account_name, _home_url, _logger):
+            calls["switch"] += 1
+
+        def fake_open_feedback_page(_page, **_kwargs):
+            calls["feedback"] += 1
+            return "https://example.com/detail"
+
+        result = fetch_account_in_page_impl(
+            page,
+            object(),
+            account,
+            None,
+            "",
+            None,
+            account_output_dir_fn=lambda _account_name: Path("output") / "账号A",
+            register_response_capture_fn=fake_register_response_capture,
+            capture_response_payload_fn=lambda response: response,
+            resolve_bootstrap_url_fn=lambda _account, _output_dir: _account.home_url,
+            wait_for_url_contains_fn=lambda *_args, **_kwargs: True,
+            extract_current_account_name_fn=fake_extract_current_account_name,
+            should_switch_for_account_fn=lambda _account, current_account_name: current_account_name != _account.name,
+            switch_to_account_fn=fake_switch_to_account,
+            log_fn=lambda _logger, _message: None,
+            open_feedback_page_fn=fake_open_feedback_page,
+            build_feedback_url_fn=lambda page_url: page_url,
+            wait_for_iframe_ready_fn=lambda *_args, **_kwargs: True,
+            resolve_frame_locator_fn=lambda *_args, **_kwargs: FakeFrameLocator(),
+            business_iframe_selector_fn=lambda _page: "#js_iframe",
+            safe_page_content_fn=lambda _page: "<html></html>",
+            is_empty_refund_list_fn=lambda list_text: "退款申请(0)" in list_text,
+            build_empty_refund_result_fn=lambda **kwargs: FetchResult(
+                account_name=kwargs["account"].name,
+                ok=True,
+                actual_account_name=kwargs["account"].name,
+                page_url=kwargs["feedback_url"],
+            ),
+            build_detail_result_fn=lambda **kwargs: FetchResult(
+                account_name=kwargs["account"].name,
+                ok=True,
+                actual_account_name=kwargs["account"].name,
+                page_url=kwargs["feedback_url"],
+            ),
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(page.goto_calls, [])
+        self.assertEqual(calls["extract"], 0)
+        self.assertEqual(calls["switch"], 0)
+        self.assertEqual(calls["feedback"], 1)
+        self.assertEqual(calls["cleanup"], 1)
 
     def test_close_context_and_browser_still_closes_browser_when_context_close_fails(self):
         calls: list[str] = []
@@ -904,12 +1128,12 @@ class FetcherTestCase(unittest.TestCase):
             patch("desktop_py.core.fetcher.Path.exists", return_value=True),
         ):
             mock_playwright.return_value.__enter__.return_value = object()
-            batch_results = fetch_accounts_batch(
-                accounts,
-                progress=lambda result: progress_calls.append(result.account_name),
-            )
+            with self.assertRaisesRegex(CancelledError, "任务已取消"):
+                fetch_accounts_batch(
+                    accounts,
+                    progress=lambda result: progress_calls.append(result.account_name),
+                )
 
-        self.assertEqual([result.account_name for result in batch_results], ["账号A"])
         self.assertEqual(progress_calls, ["账号A"])
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,7 @@ from desktop_py.core.parser import extract_labeled_datetime
 from desktop_py.core.store import write_account_output_text, write_fetch_result
 
 
-def register_response_capture(page, capture_response_payload_fn) -> list[Any]:
+def register_response_capture(page, capture_response_payload_fn) -> tuple[list[Any], Callable[[], None]]:
     captures: list[Any] = []
 
     def handle_response(response) -> None:
@@ -19,7 +20,14 @@ def register_response_capture(page, capture_response_payload_fn) -> list[Any]:
             captures.append(capture)
 
     page.on("response", handle_response)
-    return captures
+
+    def cleanup() -> None:
+        try:
+            page.remove_listener("response", handle_response)
+        except Exception:
+            pass
+
+    return captures, cleanup
 
 
 def open_feedback_page(
@@ -32,7 +40,6 @@ def open_feedback_page(
     is_cancelled: callable | None = None,
 ) -> str:
     feedback_url = build_feedback_url_fn(page.url)
-    _log(logger, f"账号 {account.name} 自动生成反馈页链接：{feedback_url}")
     page.goto(feedback_url, wait_until="domcontentloaded", timeout=60000)
     wait_for_iframe_ready_fn(page, timeout_ms=5000, is_cancelled=is_cancelled)
     return feedback_url

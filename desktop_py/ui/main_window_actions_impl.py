@@ -103,14 +103,7 @@ def stop_fetching(window) -> None:
     if not window._threads:
         window._show_info("提示", "当前没有正在执行的抓取或推送任务。")
         return
-    running_threads = list(window._threads)
-    for thread in running_threads:
-        try:
-            thread.requestInterruption()
-            thread.wait(2000)
-        except Exception:
-            continue
-    window._threads.clear()
+    window._task_runner.cancel_all()
     window._update_action_buttons()
     window.append_log("已请求停止当前后台抓取任务。")
     window.statusBar().showMessage("已停止后台任务", 4000)

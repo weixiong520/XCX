@@ -546,6 +546,23 @@ class UiSmokeTestCase(unittest.TestCase):
         mock_run_thread.assert_called_once()
         self.assertEqual(mock_run_thread.call_args.kwargs["on_progress"], window._mark_fetch_progress)
 
+    def test_auto_fetch_and_send_success_callback_only_sends_when_called(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True, enabled=True),
+            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True),
+        ]
+        window.webhook_edit.setText("https://open.feishu.cn/open-apis/bot/v2/hook/demo")
+
+        with patch.object(window, "_run_thread") as mock_run_thread:
+            window.auto_fetch_and_send()
+
+        on_success = mock_run_thread.call_args.kwargs["on_success"]
+        with patch.object(window, "_send_summary_with_webhook") as mock_send:
+            on_success([])
+        mock_send.assert_called_once()
+
     def test_build_fetch_job_uses_batch_fetcher(self):
         window = MainWindow()
         self.addCleanup(window.close)
@@ -774,21 +791,21 @@ class UiSmokeTestCase(unittest.TestCase):
         self.addCleanup(window.close)
         calls: list[str] = []
 
-        class FakeThread:
-            def requestInterruption(self):
-                calls.append("interrupt")
+        class FakeTaskRunner:
+            def cancel_all(self):
+                calls.append("cancel")
+                window._threads.clear()
 
-            def wait(self, timeout):
-                calls.append(f"wait:{timeout}")
-                return True
+            def shutdown(self):
+                return None
 
-        window._threads = [FakeThread()]
+        window._task_runner = FakeTaskRunner()
+        window._threads = [object()]
         window._update_action_buttons()
 
         window.stop_fetching()
 
-        self.assertEqual(calls, ["interrupt", "wait:2000"])
-        self.assertEqual(window._threads, [])
+        self.assertEqual(calls, ["cancel"])
         self.assertFalse(window.stop_fetch_button.isEnabled())
         self.assertIn("已请求停止当前后台抓取任务", window.log_edit.toPlainText())
 

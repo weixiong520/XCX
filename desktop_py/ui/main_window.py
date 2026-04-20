@@ -23,6 +23,7 @@ from desktop_py.core.fetcher import (
     save_login_state_with_profile,
     validate_account_state,
 )
+from desktop_py.core.fetcher_runtime import close_all_group_runtimes
 from desktop_py.core.models import AccountConfig, AppSettings, FetchResult
 from desktop_py.core.notifier import build_summary, send_feishu_text
 from desktop_py.core.store import (
@@ -329,6 +330,8 @@ class MainWindow(QMainWindow):
 
     def request_exit(self) -> None:
         self._allow_close = True
+        self._task_runner.shutdown()
+        close_all_group_runtimes()
         if self.tray_icon is not None:
             self.tray_icon.hide()
         self.close()

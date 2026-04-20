@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from desktop_py.ui.task_runner import WindowTaskRunner
 
@@ -12,18 +13,36 @@ class FakeSignal:
 
 
 class FakeThread:
-    def __init__(self, job_builder, parent=None):
-        self.job_builder = job_builder
+    def __init__(self, parent=None):
         self.parent = parent
-        self.message = FakeSignal()
-        self.progress = FakeSignal()
-        self.succeeded = FakeSignal()
-        self.failed = FakeSignal()
-        self.finished = FakeSignal()
+        self.task_message = FakeSignal()
+        self.task_progress = FakeSignal()
+        self.task_succeeded = FakeSignal()
+        self.task_cancelled = FakeSignal()
+        self.task_failed = FakeSignal()
+        self.task_finished = FakeSignal()
+        self.idle = FakeSignal()
         self.started = False
+        self.tasks = []
+        self.cancelled = False
+        self.shutdown_called = False
 
     def start(self):
         self.started = True
+
+    def enqueue(self, **kwargs):
+        task = type("FakeTask", (), kwargs)()
+        self.tasks.append(task)
+        return task
+
+    def cancel_all(self):
+        self.cancelled = True
+
+    def shutdown(self):
+        self.shutdown_called = True
+
+    def wait(self, _timeout):
+        return True
 
 
 class TaskRunnerTestCase(unittest.TestCase):
@@ -42,8 +61,6 @@ class TaskRunnerTestCase(unittest.TestCase):
             set_status_text=statuses.append,
             status_message=lambda message, timeout: status_messages.append((message, timeout)),
         )
-
-        from unittest.mock import patch
 
         with patch("desktop_py.ui.task_runner.TaskThread", FakeThread):
             runner.run(lambda log: None, lambda _result: None, on_progress=lambda _result: None)
@@ -71,6 +88,53 @@ class TaskRunnerTestCase(unittest.TestCase):
 
         self.assertEqual(threads, [])
         self.assertEqual(updates, ["update"])
+
+    def test_cancel_all_clears_registered_worker(self):
+        updates: list[str] = []
+        threads = []
+        runner = WindowTaskRunner(
+            parent=object(),
+            threads=threads,
+            append_log=lambda _message: None,
+            update_action_buttons=lambda: updates.append("update"),
+            set_status_text=lambda _message: None,
+            status_message=lambda _message, _timeout: None,
+        )
+
+        with patch("desktop_py.ui.task_runner.TaskThread", FakeThread):
+            runner.run(lambda log: None, lambda _result: None)
+
+        self.assertEqual(len(threads), 1)
+
+        runner.cancel_all()
+
+        self.assertEqual(threads, [])
+        self.assertGreaterEqual(len(updates), 2)
+
+    def test_cancelled_task_logs_cancelled_without_failure(self):
+        logs: list[str] = []
+        statuses: list[str] = []
+        status_messages: list[tuple[str, int]] = []
+        threads = []
+        runner = WindowTaskRunner(
+            parent=object(),
+            threads=threads,
+            append_log=logs.append,
+            update_action_buttons=lambda: None,
+            set_status_text=statuses.append,
+            status_message=lambda message, timeout: status_messages.append((message, timeout)),
+        )
+
+        with patch("desktop_py.ui.task_runner.TaskThread", FakeThread):
+            runner.run(lambda log: None, lambda _result: None)
+
+        worker = runner._worker
+        task = runner._pending_tasks[0]
+        worker.task_cancelled.callbacks[0](task, "任务已取消")
+
+        self.assertIn("后台任务已取消。", logs)
+        self.assertEqual(statuses[-1], "后台任务已取消")
+        self.assertEqual(status_messages[-1], ("后台任务已取消", 4000))
 
 
 if __name__ == "__main__":
