@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from desktop_py.core.fetcher_support import CancelledError, FetchError
+from desktop_py.core.fetcher_support import (
+    CancelledError,
+    FetchError,
+    ensure_account_session_available,
+    normalize_profile_dir,
+)
 from desktop_py.core.models import AccountConfig, FetchResult
 
 
@@ -118,10 +123,16 @@ def fetch_account_impl(
     close_page_fn,
     close_context_and_browser_fn,
 ) -> FetchResult:
-    normalized_profile_dir = validate_shared_browser_profile_dir_fn(profile_dir) if profile_dir.strip() else ""
-    state_path = Path(account.state_path)
-    if not path_exists_fn(state_path) and not normalized_profile_dir:
-        raise FetchError(f"账号 {account.name} 缺少登录态文件：{state_path}")
+    normalized_profile_dir = normalize_profile_dir(
+        profile_dir,
+        validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir_fn,
+    )
+    ensure_account_session_available(
+        account,
+        normalized_profile_dir,
+        path_exists_fn=path_exists_fn,
+        error_cls=FetchError,
+    )
 
     with sync_playwright_fn() as playwright:
         browser, context = create_browser_context_fn(playwright, account, headless, normalized_profile_dir)
@@ -149,7 +160,10 @@ def fetch_accounts_batch_impl(
     close_page_fn,
     close_context_and_browser_fn,
 ) -> list[FetchResult]:
-    normalized_profile_dir = validate_shared_browser_profile_dir_fn(profile_dir) if profile_dir.strip() else ""
+    normalized_profile_dir = normalize_profile_dir(
+        profile_dir,
+        validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir_fn,
+    )
     enabled_accounts = [account for account in accounts if account.enabled and not account.is_entry_account]
     if not enabled_accounts:
         return []
@@ -165,9 +179,12 @@ def fetch_accounts_batch_impl(
             if is_cancelled is not None and is_cancelled():
                 break
             primary_account = group_accounts[0]
-            state_path = Path(primary_account.state_path)
-            if not path_exists_fn(state_path) and not normalized_profile_dir:
-                raise FetchError(f"账号 {primary_account.name} 缺少登录态文件：{state_path}")
+            ensure_account_session_available(
+                primary_account,
+                normalized_profile_dir,
+                path_exists_fn=path_exists_fn,
+                error_cls=FetchError,
+            )
 
             browser, context = create_browser_context_fn(playwright, primary_account, headless, normalized_profile_dir)
             try:

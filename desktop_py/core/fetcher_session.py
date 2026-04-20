@@ -4,8 +4,27 @@ from pathlib import Path
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from desktop_py.core.fetcher_support import FetchError
+from desktop_py.core.fetcher_support import FetchError, ensure_account_session_available, normalize_profile_dir
 from desktop_py.core.models import AccountConfig
+
+
+def _wait_for_login_success(
+    page,
+    context,
+    state_path: Path,
+    *,
+    wait_seconds: int,
+    datetime_cls,
+    is_cancelled,
+    wait_or_cancel_fn,
+) -> None:
+    deadline = datetime_cls.now().timestamp() + wait_seconds
+    while datetime_cls.now().timestamp() < deadline:
+        wait_or_cancel_fn(page, 2000, is_cancelled)
+        if "token=" in page.url or "/wxamp/index/index" in page.url:
+            context.storage_state(path=str(state_path), indexed_db=True)
+            return
+    raise FetchError("未在限定时间内检测到登录成功，已保留原登录态文件。")
 
 
 def save_login_state_impl(
@@ -33,16 +52,18 @@ def save_login_state_impl(
             log_fn(logger, f"已打开微信后台登录页，请在 {wait_seconds} 秒内完成账号 {account.name} 的扫码登录。")
             log_fn(logger, "如果页面已经是登录后的后台首页，无需重复扫码，保持页面打开等待程序自动保存即可。")
 
-            deadline = datetime_cls.now().timestamp() + wait_seconds
-            saved = False
-            while datetime_cls.now().timestamp() < deadline:
-                wait_or_cancel_fn(page, 2000, is_cancelled)
-                if "token=" in page.url or "/wxamp/index/index" in page.url:
-                    context.storage_state(path=str(state_path), indexed_db=True)
-                    saved = True
-                    break
-            if not saved:
-                raise FetchError(f"账号 {account.name} 未在限定时间内检测到登录成功，已保留原登录态文件。")
+            try:
+                _wait_for_login_success(
+                    page,
+                    context,
+                    state_path,
+                    wait_seconds=wait_seconds,
+                    datetime_cls=datetime_cls,
+                    is_cancelled=is_cancelled,
+                    wait_or_cancel_fn=wait_or_cancel_fn,
+                )
+            except FetchError as exc:
+                raise FetchError(f"账号 {account.name} {exc}") from exc
         finally:
             close_page_fn(page)
             close_context_and_browser_fn(context, browser)
@@ -66,7 +87,11 @@ def save_login_state_with_profile_impl(
     close_page_fn,
     close_context_and_browser_fn,
 ) -> str:
-    user_data_dir = Path(validate_shared_browser_profile_dir_fn(profile_dir))
+    user_data_dir = Path(
+        normalize_profile_dir(
+            profile_dir, validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir_fn
+        )
+    )
     user_data_dir.mkdir(parents=True, exist_ok=True)
     state_path = Path(account.state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,16 +108,18 @@ def save_login_state_with_profile_impl(
             log_fn(logger, f"已打开共享浏览器资料目录，请在 {wait_seconds} 秒内完成账号 {account.name} 的扫码登录。")
             log_fn(logger, "如果共享资料目录里已经保留有效登录态，无需重复扫码，保持页面打开等待程序自动保存即可。")
 
-            deadline = datetime_cls.now().timestamp() + wait_seconds
-            saved = False
-            while datetime_cls.now().timestamp() < deadline:
-                wait_or_cancel_fn(page, 2000, is_cancelled)
-                if "token=" in page.url or "/wxamp/index/index" in page.url:
-                    context.storage_state(path=str(state_path), indexed_db=True)
-                    saved = True
-                    break
-            if not saved:
-                raise FetchError(f"账号 {account.name} 未在限定时间内检测到登录成功，已保留原登录态文件。")
+            try:
+                _wait_for_login_success(
+                    page,
+                    context,
+                    state_path,
+                    wait_seconds=wait_seconds,
+                    datetime_cls=datetime_cls,
+                    is_cancelled=is_cancelled,
+                    wait_or_cancel_fn=wait_or_cancel_fn,
+                )
+            except FetchError as exc:
+                raise FetchError(f"账号 {account.name} {exc}") from exc
         finally:
             close_page_fn(page)
             close_context_and_browser_fn(context, None)
@@ -115,9 +142,17 @@ def validate_account_state_impl(
     close_context_and_browser_fn,
     log_fn,
 ) -> bool:
-    normalized_profile_dir = validate_shared_browser_profile_dir_fn(profile_dir) if profile_dir.strip() else ""
-    state_path = Path(account.state_path)
-    if not path_exists_fn(state_path) and not normalized_profile_dir:
+    normalized_profile_dir = normalize_profile_dir(
+        profile_dir,
+        validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir_fn,
+    )
+    state_path = ensure_account_session_available(
+        account,
+        normalized_profile_dir,
+        path_exists_fn=path_exists_fn,
+        error_cls=None,
+    )
+    if state_path is None:
         return False
 
     with sync_playwright_fn() as playwright:

@@ -109,6 +109,9 @@ from desktop_py.ui.main_window_actions_impl import (
     import_accounts as import_accounts_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
+    initialize_window_state as initialize_window_state_impl,
+)
+from desktop_py.ui.main_window_actions_impl import (
     login_selected as login_selected_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
@@ -155,6 +158,9 @@ from desktop_py.ui.main_window_actions_impl import (
 )
 from desktop_py.ui.main_window_actions_impl import (
     save_current_settings as save_current_settings_impl,
+)
+from desktop_py.ui.main_window_actions_impl import (
+    schedule_startup_jobs as schedule_startup_jobs_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
     select_imported_accounts as select_imported_accounts_impl,
@@ -258,10 +264,15 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        ensure_runtime_dirs()
-        self.accounts = load_accounts()
-        self.settings = load_settings()
-        self._reset_current_main_account_name()
+        self.accounts: list[AccountConfig] = []
+        self.settings = AppSettings()
+        initialize_window_state_impl(
+            self,
+            ensure_runtime_dirs_fn=ensure_runtime_dirs,
+            load_accounts_fn=load_accounts,
+            load_settings_fn=load_settings,
+            reset_current_main_account_name_fn=self._reset_current_main_account_name,
+        )
         self._threads: list[TaskThread] = []
         self._task_runner = WindowTaskRunner(
             parent=self,
@@ -304,9 +315,7 @@ class MainWindow(QMainWindow):
         self._apply_styles()
         self.refresh_table()
         self._center_on_screen()
-        QTimer.singleShot(0, self._auto_validate_entry_account)
-        QTimer.singleShot(0, self._apply_auto_fetch_push_schedule)
-        QTimer.singleShot(0, self._apply_keep_alive_schedule)
+        schedule_startup_jobs_impl(self, timer_cls=QTimer)
 
     def _center_on_screen(self) -> None:
         screen = self.screen() or QGuiApplication.primaryScreen()

@@ -1,0 +1,14 @@
+{
+  "body": {
+    "data": {
+      "user_refund_check_list": [
+        {
+          "ctrl_info": {
+            "status": "pending",
+            "operator": "tester"
+          }
+        }
+      ]
+    }
+  }
+}

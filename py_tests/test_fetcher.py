@@ -186,6 +186,13 @@ class FetcherTestCase(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.count(), 1)
 
+    def test_contract_fixture_reports_missing_switch_account_entry(self):
+        page = FixturePage(self.read_fixture("no_switch_account_menu.html"))
+
+        result = find_switch_entry(page)
+
+        self.assertIsNone(result)
+
     def test_contract_fixture_extracts_current_account_name_from_page_html(self):
         page = FakePage()
         page.set_content_results([self.read_fixture("switch_account_menu.html")])
@@ -202,10 +209,20 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertEqual(business_iframe_selector(page), "#js_iframe")
 
+    def test_contract_fixture_reports_missing_business_iframe(self):
+        page = FixturePage(self.read_fixture("no_feedback_iframe.html"))
+
+        self.assertEqual(business_iframe_selector(page), "")
+
     def test_contract_fixture_extracts_deadline_from_detail_text(self):
         deadline = extract_labeled_datetime(self.read_fixture("detail_frame.txt"), "处理截止时间")
 
         self.assertEqual(deadline, "2026-04-20 18:00")
+
+    def test_contract_fixture_returns_empty_when_detail_text_has_no_deadline(self):
+        deadline = extract_labeled_datetime(self.read_fixture("detail_without_deadline.txt"), "处理截止时间")
+
+        self.assertEqual(deadline, "")
 
     def test_contract_fixture_extracts_deadline_from_response_payload(self):
         payload = json.loads(self.read_fixture("refund_response.json"))
@@ -213,6 +230,13 @@ class FetcherTestCase(unittest.TestCase):
         deadline = _fallback_from_responses([payload])
 
         self.assertEqual(deadline, "2026-04-21 10:19:34")
+
+    def test_contract_fixture_returns_empty_when_response_has_no_deadline(self):
+        payload = json.loads(self.read_fixture("refund_response_without_deadline.json"))
+
+        deadline = _fallback_from_responses([payload])
+
+        self.assertEqual(deadline, "")
 
     def test_find_switch_entry_prefers_title_selector(self):
         title_locator = FakeLocator(count=1)

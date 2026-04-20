@@ -1,6 +1,26 @@
 from __future__ import annotations
 
 
+def initialize_window_state(
+    window,
+    *,
+    ensure_runtime_dirs_fn,
+    load_accounts_fn,
+    load_settings_fn,
+    reset_current_main_account_name_fn,
+) -> None:
+    ensure_runtime_dirs_fn()
+    window.accounts = load_accounts_fn()
+    window.settings = load_settings_fn()
+    reset_current_main_account_name_fn()
+
+
+def schedule_startup_jobs(window, *, timer_cls) -> None:
+    timer_cls.singleShot(0, window._auto_validate_entry_account)
+    timer_cls.singleShot(0, window._apply_auto_fetch_push_schedule)
+    timer_cls.singleShot(0, window._apply_keep_alive_schedule)
+
+
 def auto_validate_entry_account(window, *, os_module, validate_account_state_fn) -> None:
     if os_module.environ.get("QT_QPA_PLATFORM") == "offscreen":
         return

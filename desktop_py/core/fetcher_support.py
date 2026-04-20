@@ -30,6 +30,33 @@ BUSINESS_IFRAME_SELECTORS = (
 )
 
 
+def normalize_profile_dir(profile_dir: str, *, validate_shared_browser_profile_dir_fn) -> str:
+    if not profile_dir.strip():
+        return ""
+    return validate_shared_browser_profile_dir_fn(profile_dir)
+
+
+def account_state_path(account) -> Path:
+    return Path(account.state_path)
+
+
+def ensure_account_session_available(
+    account,
+    normalized_profile_dir: str,
+    *,
+    path_exists_fn,
+    error_cls: type[Exception] | None = None,
+) -> Path | None:
+    state_path = account_state_path(account)
+    if normalized_profile_dir:
+        return state_path
+    if path_exists_fn(state_path):
+        return state_path
+    if error_cls is not None:
+        raise error_cls(f"账号 {account.name} 缺少登录态文件：{state_path}")
+    return None
+
+
 def wait_for_url_contains(
     page: Page,
     keywords: tuple[str, ...],

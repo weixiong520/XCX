@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import re
 import time
-from pathlib import Path
 
 from playwright.sync_api import Locator, Page
 
-from desktop_py.core.fetcher_support import FetchError
+from desktop_py.core.fetcher_support import FetchError, ensure_account_session_available, normalize_profile_dir
 from desktop_py.core.models import AccountConfig
 
 
@@ -288,10 +287,16 @@ def fetch_switchable_accounts_impl(
     close_page_fn,
     close_context_and_browser_fn,
 ) -> list[str]:
-    normalized_profile_dir = validate_shared_browser_profile_dir_fn(profile_dir) if profile_dir.strip() else ""
-    state_path = Path(account.state_path)
-    if not path_exists_fn(state_path) and not normalized_profile_dir:
-        raise FetchError(f"账号 {account.name} 缺少登录态文件：{state_path}")
+    normalized_profile_dir = normalize_profile_dir(
+        profile_dir,
+        validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir_fn,
+    )
+    state_path = ensure_account_session_available(
+        account,
+        normalized_profile_dir,
+        path_exists_fn=path_exists_fn,
+        error_cls=FetchError,
+    )
 
     with sync_playwright_fn() as playwright:
         browser, context = create_browser_context_fn(playwright, account, headless, normalized_profile_dir)

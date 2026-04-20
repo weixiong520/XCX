@@ -33,6 +33,18 @@ python -m pip install -r requirements.txt
   - 办公网或普通开发环境：使用默认在线安装策略，减小安装包体积
   - 内网、弱网或离线终端：使用离线预置策略，避免首次启动失败
 
+### 离线预置建议
+
+如果目标环境不能联网，建议按以下方式准备离线运行时：
+
+1. 在可联网环境执行 `playwright install chromium`
+2. 将生成的 `ms-playwright/` 完整目录与应用一起交付
+3. 确保运行目录中存在：
+   - `chromium-*`
+   - `chromium_headless_shell-*`
+   - `ffmpeg-*`
+4. 首次启动前确认程序运行目录具备这些资源，避免再触发在线下载
+
 ## 安装包构建依赖
 
 先安装构建依赖：
@@ -153,6 +165,12 @@ python desktop_py_cli.py notify
 python -m unittest discover -s py_tests -v
 ```
 
+### 安装包链路最小验证
+
+```powershell
+python -m unittest py_tests.test_browser_runtime py_tests.test_build_installer -v
+```
+
 ## 工程检查
 
 项目根目录已提供 `pyproject.toml`，当前统一使用 `ruff` 承担格式检查与静态检查。
@@ -160,13 +178,13 @@ python -m unittest discover -s py_tests -v
 ### 格式检查
 
 ```powershell
-python -m ruff format --check .
+ruff format --check .
 ```
 
 ### 静态检查
 
 ```powershell
-python -m ruff check .
+ruff check .
 ```
 
 ## 推荐本地交付流程
@@ -174,8 +192,8 @@ python -m ruff check .
 ```powershell
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-build.txt
-python -m ruff format --check .
-python -m ruff check .
+ruff format --check .
+ruff check .
 python -m unittest discover -s py_tests -v
 pwsh ./scripts/build_installer.ps1 -Clean
 ```
