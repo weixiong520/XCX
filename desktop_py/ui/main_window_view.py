@@ -246,8 +246,6 @@ def build_actions(window) -> QGridLayout:
         ("全选账号", window.select_imported_accounts, 0, 2),
         ("删除账号", window.delete_account, 0, 3),
         ("导入账号", window.import_accounts, 1, 0),
-        ("保存登录", window.login_selected, 1, 1),
-        ("检测登录", window.validate_selected, 1, 2),
         ("停止抓取", window.stop_fetching, 1, 3),
         ("抓取并推送", window.auto_fetch_and_send, 2, 2),
         ("抓取选中", window.fetch_selected, 2, 0),
@@ -255,8 +253,6 @@ def build_actions(window) -> QGridLayout:
     ]
     for text, handler, row, col in actions:
         button = QPushButton(text)
-        if text == "保存登录":
-            window.login_button = button
         if text == "编辑账号":
             window.edit_button = button
         if text == "删除账号":
@@ -267,8 +263,6 @@ def build_actions(window) -> QGridLayout:
             button.setProperty("role", "danger")
         if text == "导入账号":
             window.import_button = button
-        if text == "检测登录":
-            window.validate_button = button
         if text == "抓取选中":
             window.fetch_selected_button = button
         if text == "发送飞书":
@@ -281,6 +275,23 @@ def build_actions(window) -> QGridLayout:
         button.setMinimumWidth(0)
         button.clicked.connect(handler)
         layout.addWidget(button, row, col)
+    auth_group = QWidget()
+    auth_layout = QHBoxLayout(auth_group)
+    auth_layout.setContentsMargins(0, 0, 0, 0)
+    auth_layout.setSpacing(8)
+    for text, handler, attr_name in (
+        ("保存登录", window.login_selected, "login_button"),
+        ("检测登录", window.validate_selected, "validate_button"),
+        ("登录续期", window.renew_selected, "renew_button"),
+    ):
+        button = QPushButton(text)
+        button.setProperty("role", "primary")
+        button.setMinimumWidth(0)
+        button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        button.clicked.connect(handler)
+        setattr(window, attr_name, button)
+        auth_layout.addWidget(button)
+    layout.addWidget(auth_group, 1, 1, 1, 2)
     layout.addWidget(build_auto_fetch_push_switch(window), 2, 3)
     layout.setColumnStretch(0, 1)
     layout.setColumnStretch(1, 1)

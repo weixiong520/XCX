@@ -28,6 +28,8 @@ from desktop_py.core.fetcher_support import (
     _fallback_from_responses,
     build_feedback_url,
     business_iframe_selector,
+    classify_refund_response_type,
+    extract_response_token,
     safe_page_content,
     wait_for_iframe_ready,
     wait_for_url_contains,
@@ -576,6 +578,35 @@ class FetcherTestCase(unittest.TestCase):
             payload["body"]["data"]["user_refund_check_list"][0]["ctrl_info"]["appeal_deadline_time"], "1776737974"
         )
 
+    def test_capture_response_payload_adds_business_metadata(self):
+        response = FakeResponse(
+            '{"data":{"total_count":1,"user_refund_check_list":[{"ctrl_info":{"deadline_time":"1777046400"}}]}}',
+            url="https://game.weixin.qq.com/cgi-bin/gamewxagbdatawap/getuserrefundchecklist?per_page=6&cur_page=0",
+        )
+
+        payload = _capture_response_payload(response)
+
+        self.assertEqual(payload["response_type"], "list")
+        self.assertIn("captured_at", payload)
+        self.assertEqual(payload["token"], "")
+
+    def test_classify_refund_response_type_distinguishes_list_and_detail(self):
+        self.assertEqual(
+            classify_refund_response_type(
+                "https://game.weixin.qq.com/cgi-bin/gamewxagbdatawap/getuserrefundchecklist?per_page=6&cur_page=0",
+                {},
+            ),
+            "list",
+        )
+        self.assertEqual(
+            classify_refund_response_type(
+                "https://game.weixin.qq.com/cgi-bin/gamewxagbdatawap/getuserrefundchecklist?cid=abc",
+                {},
+            ),
+            "detail",
+        )
+        self.assertEqual(extract_response_token("https://mp.weixin.qq.com/wxamp/index/index?token=123"), "123")
+
     def test_offline_response_fixture_extracts_deadline_candidate(self):
         deadline = _fallback_from_responses(
             [
@@ -985,6 +1016,85 @@ class FetcherTestCase(unittest.TestCase):
         self.assertFalse(empty_called["value"])
         self.assertTrue(detail_called["value"])
 
+    def test_fetch_account_in_page_only_passes_feedback_window_captures(self):
+        class DemoPage:
+            def __init__(self):
+                self.url = "https://mp.weixin.qq.com/wxamp/index/index?token=1"
+
+        page = DemoPage()
+        account = AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False)
+        captures = [
+            {"response_type": "list", "body": {"data": {"total_count": 0, "user_refund_check_list": []}}},
+        ]
+        seen_confirm_captures: list[list[dict]] = []
+
+        class FrameLocator:
+            def locator(self, selector):
+                return FakeLocator(text="退款申请(0)")
+
+            def get_by_text(self, text, exact=False):
+                return FakeLocator(count=0)
+
+        def fake_open_feedback_page(_page, **_kwargs):
+            captures.append(
+                {
+                    "response_type": "list",
+                    "body": {
+                        "data": {
+                            "total_count": 1,
+                            "user_refund_check_list": [{"ctrl_info": {"deadline_time": "1777046400"}}],
+                        }
+                    },
+                }
+            )
+            return "https://example.com/detail"
+
+        result = fetch_account_in_page_impl(
+            page,
+            object(),
+            account,
+            None,
+            "",
+            None,
+            account_output_dir_fn=lambda _account_name: Path("output") / "账号A",
+            register_response_capture_fn=lambda _page, _capture: (captures, lambda: None),
+            capture_response_payload_fn=lambda response: response,
+            resolve_bootstrap_url_fn=lambda _account, _output_dir: _account.home_url,
+            wait_for_url_contains_fn=lambda *_args, **_kwargs: True,
+            extract_current_account_name_fn=lambda _page: "账号A",
+            should_switch_for_account_fn=lambda _account, _current_account_name: False,
+            switch_to_account_fn=lambda *_args, **_kwargs: None,
+            log_fn=lambda *_args, **_kwargs: None,
+            open_feedback_page_fn=fake_open_feedback_page,
+            build_feedback_url_fn=lambda page_url: page_url,
+            wait_for_iframe_ready_fn=lambda *_args, **_kwargs: True,
+            resolve_frame_locator_fn=lambda *_args, **_kwargs: FrameLocator(),
+            business_iframe_selector_fn=lambda _page: "#js_iframe",
+            safe_page_content_fn=lambda _page: "<html></html>",
+            is_empty_refund_list_fn=lambda list_text: "退款申请(0)" in list_text,
+            confirm_empty_refund_list_fn=lambda **kwargs: (
+                seen_confirm_captures.append(list(kwargs["captures"])) or (False, kwargs["initial_text"])
+            ),
+            build_empty_refund_result_fn=lambda **kwargs: FetchResult(
+                account_name=kwargs["account"].name,
+                ok=True,
+                actual_account_name=kwargs["account"].name,
+                page_url=kwargs["feedback_url"],
+            ),
+            build_detail_result_fn=lambda **kwargs: FetchResult(
+                account_name=kwargs["account"].name,
+                ok=True,
+                actual_account_name=kwargs["account"].name,
+                deadline_text="2026-04-25 00:00:00",
+                page_url=kwargs["feedback_url"],
+            ),
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(len(seen_confirm_captures), 1)
+        self.assertEqual(len(seen_confirm_captures[0]), 1)
+        self.assertEqual(seen_confirm_captures[0][0]["body"]["data"]["total_count"], 1)
+
     def test_confirm_empty_refund_list_requires_second_confirmation(self):
         from desktop_py.core.fetcher_page_strategy import confirm_empty_refund_list
 
@@ -1045,6 +1155,48 @@ class FetcherTestCase(unittest.TestCase):
         self.assertFalse(confirmed)
         self.assertIn("处理截止时间", latest_text)
 
+    def test_confirm_empty_refund_list_detects_very_late_detail_before_accepting_empty(self):
+        from desktop_py.core.fetcher_page_strategy import confirm_empty_refund_list
+
+        page = FakePage()
+
+        class BodyLocator:
+            def __init__(self):
+                self._values = [
+                    "退款申请(0)",
+                    "退款申请(0)",
+                    "退款申请(0)",
+                    "退款申请(0)",
+                    "退款申请(1) 处理截止时间：2026-04-22 16:02:09",
+                ]
+
+            def text_content(self, timeout=None):
+                if len(self._values) > 1:
+                    return self._values.pop(0)
+                return self._values[0]
+
+        body_locator = BodyLocator()
+
+        class FrameLocator:
+            def locator(self, selector):
+                return body_locator
+
+        confirmed, latest_text = confirm_empty_refund_list(
+            page=page,
+            frame_locator=FrameLocator(),
+            initial_text="退款申请(0)",
+            captures=[],
+            is_empty_refund_list_fn=lambda text: "退款申请(0)" in text,
+            has_pending_refund_signal_fn=lambda text: "处理截止时间" in text or "退款申请(1)" in text,
+            captures_indicate_non_empty_refunds_fn=lambda captures: False,
+            wait_or_cancel_fn=lambda _page, _timeout_ms, _is_cancelled=None: None,
+            retries=5,
+            interval_ms=1,
+        )
+
+        self.assertFalse(confirmed)
+        self.assertIn("处理截止时间", latest_text)
+
     def test_confirm_empty_refund_list_uses_capture_signal_to_block_false_empty(self):
         from desktop_py.core.fetcher_page_strategy import confirm_empty_refund_list
 
@@ -1069,6 +1221,73 @@ class FetcherTestCase(unittest.TestCase):
         )
 
         self.assertFalse(confirmed)
+        self.assertEqual(latest_text, "退款申请(0)")
+
+    def test_confirm_empty_refund_list_prefers_non_empty_list_capture_over_empty_dom(self):
+        from desktop_py.core.fetcher_page_strategy import confirm_empty_refund_list
+
+        page = FakePage()
+        body_locator = FakeLocator(text="退款申请(0)")
+
+        class FrameLocator:
+            def locator(self, selector):
+                return body_locator
+
+        confirmed, latest_text = confirm_empty_refund_list(
+            page=page,
+            frame_locator=FrameLocator(),
+            initial_text="退款申请(0)",
+            captures=[
+                {
+                    "response_type": "list",
+                    "body": {
+                        "data": {
+                            "total_count": 1,
+                            "user_refund_check_list": [{"ctrl_info": {"deadline_time": "1777046400"}}],
+                        }
+                    },
+                }
+            ],
+            is_empty_refund_list_fn=lambda text: "退款申请(0)" in text,
+            has_pending_refund_signal_fn=lambda text: False,
+            captures_indicate_non_empty_refunds_fn=lambda captures: False,
+            wait_or_cancel_fn=lambda _page, _timeout_ms, _is_cancelled=None: None,
+            retries=1,
+            interval_ms=1,
+        )
+
+        self.assertFalse(confirmed)
+        self.assertEqual(latest_text, "退款申请(0)")
+
+    def test_confirm_empty_refund_list_prefers_empty_list_capture_when_dom_empty(self):
+        from desktop_py.core.fetcher_page_strategy import confirm_empty_refund_list
+
+        page = FakePage()
+        body_locator = FakeLocator(text="退款申请(0)")
+
+        class FrameLocator:
+            def locator(self, selector):
+                return body_locator
+
+        confirmed, latest_text = confirm_empty_refund_list(
+            page=page,
+            frame_locator=FrameLocator(),
+            initial_text="退款申请(0)",
+            captures=[
+                {
+                    "response_type": "list",
+                    "body": {"data": {"total_count": 0, "user_refund_check_list": []}},
+                }
+            ],
+            is_empty_refund_list_fn=lambda text: "退款申请(0)" in text,
+            has_pending_refund_signal_fn=lambda text: False,
+            captures_indicate_non_empty_refunds_fn=lambda captures: False,
+            wait_or_cancel_fn=lambda _page, _timeout_ms, _is_cancelled=None: None,
+            retries=1,
+            interval_ms=1,
+        )
+
+        self.assertTrue(confirmed)
         self.assertEqual(latest_text, "退款申请(0)")
 
     def test_confirm_detail_deadline_retries_until_text_ready(self):
@@ -1098,8 +1317,10 @@ class FetcherTestCase(unittest.TestCase):
             page=page,
             frame_locator=FrameLocator(),
             captures=[],
+            feedback_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
             extract_labeled_datetime_fn=extract_labeled_datetime,
             fallback_from_responses_fn=lambda _captures: "",
+            filter_detail_captures_fn=lambda captures, _feedback_url: captures,
             wait_or_cancel_fn=lambda _page, timeout_ms, _is_cancelled=None: page.wait_for_timeout(timeout_ms),
             retries=2,
             interval_ms=1,
@@ -1108,6 +1329,152 @@ class FetcherTestCase(unittest.TestCase):
         self.assertEqual(deadline_text, "2026-04-25 00:00:00")
         self.assertIn("处理截止时间", frame_text)
         self.assertEqual(page.wait_calls, [1])
+
+    def test_confirm_detail_deadline_prefers_detail_capture_over_dom(self):
+        from desktop_py.core.fetcher_page_strategy import confirm_detail_deadline, filter_detail_captures
+
+        page = FakePage()
+
+        class BodyLocator:
+            def text_content(self, timeout=None):
+                return "详情加载中"
+
+            def inner_html(self, timeout=None):
+                return "<div>loading</div>"
+
+        class FrameLocator:
+            def locator(self, selector):
+                return BodyLocator()
+
+        deadline_text, frame_text, _frame_html = confirm_detail_deadline(
+            page=page,
+            frame_locator=FrameLocator(),
+            captures=[
+                {
+                    "response_type": "detail",
+                    "url": "https://game.weixin.qq.com/cgi-bin/gamewxagbdatawap/getuserrefundchecklist?cid=abc",
+                    "body": {"data": {"user_refund_check_list": [{"ctrl_info": {"deadline_time": "1777046400"}}]}},
+                }
+            ],
+            feedback_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+            extract_labeled_datetime_fn=extract_labeled_datetime,
+            fallback_from_responses_fn=_fallback_from_responses,
+            filter_detail_captures_fn=filter_detail_captures,
+            wait_or_cancel_fn=lambda _page, _timeout_ms, _is_cancelled=None: None,
+            retries=0,
+            interval_ms=1,
+        )
+
+        self.assertEqual(deadline_text, "2026-04-25 00:00:00")
+        self.assertEqual(frame_text, "详情加载中")
+
+    def test_confirm_detail_deadline_filters_previous_account_captures(self):
+        from desktop_py.core.fetcher_page_strategy import confirm_detail_deadline, filter_detail_captures
+
+        page = FakePage()
+
+        class BodyLocator:
+            def text_content(self, timeout=None):
+                return "详情加载中"
+
+            def inner_html(self, timeout=None):
+                return "<div>detail</div>"
+
+        class FrameLocator:
+            def locator(self, selector):
+                return BodyLocator()
+
+        captures = [
+            {
+                "response_type": "detail",
+                "token": "old",
+                "url": "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=old",
+                "body": {
+                    "data": {"user_refund_check_list": [{"ctrl_info": {"appeal_deadline_time": "2026-04-22 16:02:09"}}]}
+                },
+            },
+            {
+                "response_type": "detail",
+                "token": "current",
+                "url": "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+                "body": {
+                    "data": {"user_refund_check_list": [{"ctrl_info": {"appeal_deadline_time": "2026-04-27 08:37:32"}}]}
+                },
+            },
+        ]
+
+        deadline_text, _frame_text, _frame_html = confirm_detail_deadline(
+            page=page,
+            frame_locator=FrameLocator(),
+            captures=captures,
+            feedback_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+            extract_labeled_datetime_fn=extract_labeled_datetime,
+            fallback_from_responses_fn=_fallback_from_responses,
+            filter_detail_captures_fn=filter_detail_captures,
+            wait_or_cancel_fn=lambda _page, _timeout_ms, _is_cancelled=None: None,
+            retries=0,
+            interval_ms=1,
+        )
+
+        self.assertEqual(deadline_text, "2026-04-27 08:37:32")
+
+    def test_build_detail_result_only_uses_captures_after_action_click(self):
+        from desktop_py.core.fetcher_page_strategy import build_detail_result
+
+        captures = [
+            {
+                "url": "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+                "body": {"data": {"appeal_deadline_time": "2026-04-22 16:02:09"}},
+            }
+        ]
+        seen_captures: list[list[dict]] = []
+
+        class ActionLocator:
+            def __init__(self):
+                self.last = self
+
+            def count(self):
+                return 1
+
+            def click(self, timeout=None):
+                captures.append(
+                    {
+                        "url": "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+                        "body": {"data": {"appeal_deadline_time": "2026-04-27 08:37:32"}},
+                    }
+                )
+
+        class FrameLocator:
+            def get_by_text(self, text, exact=False):
+                return ActionLocator()
+
+        def fake_confirm_detail_deadline(**kwargs):
+            seen_captures.append(list(kwargs["captures"]))
+            return _fallback_from_responses(kwargs["captures"]), "detail text", "<div>detail</div>"
+
+        with TemporaryDirectory() as temp_dir:
+            result = build_detail_result(
+                page=object(),
+                context=object(),
+                account=AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False),
+                output_dir=Path(temp_dir),
+                frame_locator=FrameLocator(),
+                captures=captures,
+                feedback_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+                profile_dir="",
+                logger=None,
+                safe_page_content_fn=lambda _page: "<html></html>",
+                extract_current_account_name_fn=lambda _page: "账号A",
+                confirm_detail_deadline_fn=fake_confirm_detail_deadline,
+            )
+
+        self.assertEqual(result.deadline_text, "2026-04-27 08:37:32")
+        self.assertEqual(len(seen_captures), 1)
+        self.assertEqual(len(seen_captures[0]), 1)
+        self.assertEqual(
+            _fallback_from_responses(seen_captures[0]),
+            "2026-04-27 08:37:32",
+        )
 
     def test_close_context_and_browser_still_closes_browser_when_context_close_fails(self):
         calls: list[str] = []

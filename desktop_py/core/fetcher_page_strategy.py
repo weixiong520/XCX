@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from desktop_py.core.fetcher_output import persist_storage_state, write_fetch_artifacts
 from desktop_py.core.fetcher_support import FetchError, _fallback_from_responses
@@ -27,6 +28,99 @@ def register_response_capture(page, capture_response_payload_fn) -> tuple[list[A
             pass
 
     return captures, cleanup
+
+
+def filter_detail_captures(captures: list[Any], feedback_url: str) -> list[Any]:
+    current_token = (parse_qs(urlparse(feedback_url).query).get("token") or [""])[0].strip()
+    if not captures:
+        return []
+
+    filtered: list[Any] = []
+    for capture in captures:
+        if not isinstance(capture, dict):
+            continue
+        capture_url = str(capture.get("url", "") or "").strip()
+        if not capture_url:
+            continue
+        response_type = str(capture.get("response_type", "") or "").strip()
+        capture_token = str(capture.get("token", "") or "").strip()
+        if current_token and capture_token and capture_token != current_token:
+            continue
+        if response_type in {"detail", "list"}:
+            filtered.append(capture)
+            continue
+        if any(keyword in capture_url for keyword in ("gameFeedback", "refund")):
+            if current_token and capture_token and capture_token != current_token:
+                continue
+            filtered.append(capture)
+    return filtered
+
+
+def _latest_refund_capture(captures: list[Any], response_type: str) -> dict[str, Any] | None:
+    for capture in reversed(captures):
+        if not isinstance(capture, dict):
+            continue
+        if str(capture.get("response_type", "") or "").strip() != response_type:
+            continue
+        return capture
+    return None
+
+
+def _refund_items_from_capture(capture: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not capture:
+        return []
+    body = capture.get("body")
+    if not isinstance(body, dict):
+        return []
+    data = body.get("data")
+    if not isinstance(data, dict):
+        return []
+    items = data.get("user_refund_check_list")
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def list_capture_result(captures: list[Any]) -> str:
+    capture = _latest_refund_capture(captures, "list")
+    if capture is None:
+        return "unknown"
+    items = _refund_items_from_capture(capture)
+    if items:
+        return "non_empty"
+    body = capture.get("body")
+    if not isinstance(body, dict):
+        return "unknown"
+    data = body.get("data")
+    if not isinstance(data, dict):
+        return "unknown"
+    total_count = data.get("total_count")
+    if total_count == 0:
+        return "empty"
+    return "unknown"
+
+
+def extract_deadline_from_refund_capture(capture: dict[str, Any] | None) -> str:
+    items = _refund_items_from_capture(capture)
+    for item in items:
+        ctrl_info = item.get("ctrl_info")
+        if not isinstance(ctrl_info, dict):
+            continue
+        deadline_text = _fallback_from_responses([ctrl_info])
+        if deadline_text:
+            return deadline_text
+    if capture is None:
+        return ""
+    return _fallback_from_responses([capture])
+
+
+def extract_deadline_from_captures(captures: list[Any]) -> str:
+    detail_capture = _latest_refund_capture(captures, "detail")
+    deadline_text = extract_deadline_from_refund_capture(detail_capture)
+    if deadline_text:
+        return deadline_text
+    list_capture = _latest_refund_capture(captures, "list")
+    return extract_deadline_from_refund_capture(list_capture)
 
 
 def open_feedback_page(
@@ -65,6 +159,11 @@ def has_pending_refund_signal(list_text: str) -> bool:
 
 
 def captures_indicate_non_empty_refunds(captures: list[Any]) -> bool:
+    if list_capture_result(captures) == "non_empty":
+        return True
+    if extract_deadline_from_captures(captures).strip():
+        return True
+
     deadline_candidate = _fallback_from_responses(captures)
     if deadline_candidate.strip():
         return True
@@ -91,10 +190,12 @@ def confirm_empty_refund_list(
     captures_indicate_non_empty_refunds_fn,
     is_cancelled: callable | None = None,
     wait_or_cancel_fn,
-    retries: int = 2,
+    retries: int = 6,
     interval_ms: int = 1500,
 ) -> tuple[bool, str]:
     latest_text = initial_text
+    if list_capture_result(captures) == "non_empty":
+        return False, latest_text
     if has_pending_refund_signal_fn(latest_text) or captures_indicate_non_empty_refunds_fn(captures):
         return False, latest_text
 
@@ -104,11 +205,15 @@ def confirm_empty_refund_list(
     for _ in range(retries):
         wait_or_cancel_fn(page, interval_ms, is_cancelled)
         latest_text = frame_locator.locator("body").text_content(timeout=15000) or ""
+        if list_capture_result(captures) == "non_empty":
+            return False, latest_text
         if has_pending_refund_signal_fn(latest_text) or captures_indicate_non_empty_refunds_fn(captures):
             return False, latest_text
         if not is_empty_refund_list_fn(latest_text):
             return False, latest_text
 
+    if list_capture_result(captures) == "empty":
+        return True, latest_text
     return True, latest_text
 
 
@@ -155,8 +260,10 @@ def confirm_detail_deadline(
     page,
     frame_locator,
     captures: list[Any],
+    feedback_url: str,
     extract_labeled_datetime_fn,
     fallback_from_responses_fn,
+    filter_detail_captures_fn,
     wait_or_cancel_fn,
     is_cancelled: callable | None = None,
     retries: int = 3,
@@ -167,11 +274,18 @@ def confirm_detail_deadline(
     deadline_text = ""
 
     for attempt in range(retries + 1):
+        detail_captures = filter_detail_captures_fn(captures, feedback_url)
+        deadline_text = extract_deadline_from_captures(detail_captures)
+        if deadline_text:
+            latest_text = frame_locator.locator("body").text_content(timeout=15000) or ""
+            latest_html = frame_locator.locator("body").inner_html(timeout=15000)
+            return deadline_text, latest_text, latest_html
+
         latest_text = frame_locator.locator("body").text_content(timeout=15000) or ""
         latest_html = frame_locator.locator("body").inner_html(timeout=15000)
         deadline_text = extract_labeled_datetime_fn(latest_text, "处理截止时间")
         if not deadline_text:
-            deadline_text = fallback_from_responses_fn(captures)
+            deadline_text = fallback_from_responses_fn(detail_captures)
         if deadline_text:
             return deadline_text, latest_text, latest_html
         if attempt < retries:
@@ -197,12 +311,15 @@ def build_detail_result(
     is_cancelled: callable | None = None,
 ) -> FetchResult:
     action_locator = frame_locator.get_by_text("处理", exact=True)
+    detail_capture_start = 0
     if action_locator.count():
+        detail_capture_start = len(captures)
         action_locator.last.click(timeout=10000)
     deadline_text, frame_text, frame_html = confirm_detail_deadline_fn(
         page=page,
         frame_locator=frame_locator,
-        captures=captures,
+        captures=captures[detail_capture_start:],
+        feedback_url=feedback_url,
         is_cancelled=is_cancelled,
     )
     actual_account_name = extract_current_account_name_fn(page)

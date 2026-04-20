@@ -106,6 +106,7 @@ def fetch_account_in_page_impl(
         else:
             log_fn(logger, f"账号 {account.name} 已处于当前会话，跳过切换步骤。")
 
+        feedback_capture_start = len(captures)
         feedback_url = open_feedback_page_fn(
             page,
             account=account,
@@ -114,6 +115,7 @@ def fetch_account_in_page_impl(
             wait_for_iframe_ready_fn=wait_for_iframe_ready_fn,
             is_cancelled=is_cancelled,
         )
+        current_captures = captures[feedback_capture_start:]
         frame_locator = resolve_frame_locator_fn(
             page,
             output_dir=output_dir,
@@ -126,7 +128,7 @@ def fetch_account_in_page_impl(
             page=page,
             frame_locator=frame_locator,
             initial_text=list_text,
-            captures=captures,
+            captures=current_captures,
             is_empty_refund_list_fn=is_empty_refund_list_fn,
             is_cancelled=is_cancelled,
         )
@@ -139,7 +141,7 @@ def fetch_account_in_page_impl(
                 output_dir=output_dir,
                 frame_locator=frame_locator,
                 list_text=confirmed_list_text,
-                captures=captures,
+                captures=current_captures,
                 feedback_url=feedback_url,
                 profile_dir=profile_dir,
                 logger=logger,
@@ -154,7 +156,7 @@ def fetch_account_in_page_impl(
                 account=account,
                 output_dir=output_dir,
                 frame_locator=frame_locator,
-                captures=captures,
+                captures=current_captures,
                 feedback_url=feedback_url,
                 profile_dir=profile_dir,
                 logger=logger,

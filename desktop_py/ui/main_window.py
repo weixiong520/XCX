@@ -133,6 +133,9 @@ from desktop_py.ui.main_window_actions_impl import (
     milliseconds_until_next_auto_fetch_push as milliseconds_until_next_auto_fetch_push_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
+    renew_selected as renew_selected_impl,
+)
+from desktop_py.ui.main_window_actions_impl import (
     reset_current_main_account_name as reset_current_main_account_name_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
@@ -276,6 +279,7 @@ class MainWindow(QMainWindow):
         self._summary_labels: dict[str, QLabel] = {}
         self._status_label: QLabel | None = None
         self.login_button: QPushButton | None = None
+        self.renew_button: QPushButton | None = None
         self.edit_button: QPushButton | None = None
         self.import_button: QPushButton | None = None
         self.validate_button: QPushButton | None = None
@@ -489,6 +493,9 @@ class MainWindow(QMainWindow):
 
     def validate_selected(self) -> None:
         validate_selected_impl(self, validate_account_state_fn=validate_account_state)
+
+    def renew_selected(self) -> None:
+        renew_selected_impl(self, renew_account_state_fn=renew_account_state)
 
     def _mark_validation(self, account: AccountConfig, valid: bool) -> None:
         mark_validation_impl(self, account, valid, save_accounts_fn=save_accounts)

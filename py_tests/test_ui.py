@@ -378,6 +378,7 @@ class UiSmokeTestCase(unittest.TestCase):
         window.refresh_table()
 
         self.assertTrue(window.login_button.isEnabled())
+        self.assertTrue(window.renew_button.isEnabled())
         self.assertTrue(window.edit_button.isEnabled())
         self.assertTrue(window.import_button.isEnabled())
         self.assertTrue(window.validate_button.isEnabled())
@@ -387,6 +388,7 @@ class UiSmokeTestCase(unittest.TestCase):
 
         window.table.selectRow(1)
         self.assertFalse(window.login_button.isEnabled())
+        self.assertFalse(window.renew_button.isEnabled())
         self.assertFalse(window.edit_button.isEnabled())
         self.assertFalse(window.import_button.isEnabled())
         self.assertFalse(window.validate_button.isEnabled())
@@ -411,6 +413,7 @@ class UiSmokeTestCase(unittest.TestCase):
         )
 
         self.assertFalse(window.login_button.isEnabled())
+        self.assertFalse(window.renew_button.isEnabled())
         self.assertFalse(window.edit_button.isEnabled())
         self.assertFalse(window.import_button.isEnabled())
         self.assertFalse(window.validate_button.isEnabled())
@@ -452,6 +455,26 @@ class UiSmokeTestCase(unittest.TestCase):
 
         mock_information.assert_called_once()
         self.assertIn("导入账号不能校验登录态", mock_information.call_args.args[1])
+        mock_run_thread.assert_not_called()
+
+    def test_imported_account_cannot_renew_login_state(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
+            AccountConfig(name="导入账号", state_path="storage/shared.json", is_entry_account=False),
+        ]
+        window.refresh_table()
+        window.table.selectRow(1)
+
+        with (
+            patch.object(window, "_show_info") as mock_information,
+            patch.object(window, "_run_thread") as mock_run_thread,
+        ):
+            window.renew_selected()
+
+        mock_information.assert_called_once()
+        self.assertIn("导入账号不能登录续期", mock_information.call_args.args[1])
         mock_run_thread.assert_not_called()
 
     def test_imported_account_cannot_import_accounts(self):
@@ -585,6 +608,7 @@ class UiSmokeTestCase(unittest.TestCase):
 
         self.assertIn("抓取并推送", buttons)
         self.assertIn("停止抓取", buttons)
+        self.assertIn("登录续期", buttons)
         self.assertNotIn("抓取全部", buttons)
 
     def test_send_summary_button_moves_to_fetch_all_slot(self):
@@ -764,6 +788,35 @@ class UiSmokeTestCase(unittest.TestCase):
         with patch("desktop_py.ui.main_window.renew_account_state", return_value=True) as mock_renew:
             self.assertTrue(job(lambda _message: None))
         self.assertEqual(mock_renew.call_args.args[0].name, "主账号")
+
+    def test_renew_selected_uses_selected_entry_account(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
+            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False),
+        ]
+        window.refresh_table()
+
+        with (
+            patch("desktop_py.ui.main_window.renew_account_state", return_value=True) as mock_renew,
+            patch.object(window, "_run_thread") as mock_run_thread,
+        ):
+            window.renew_selected()
+
+        mock_run_thread.assert_called_once()
+        job = mock_run_thread.call_args.args[0]
+        self.assertTrue(job(lambda _message: None))
+        self.assertEqual(mock_renew.call_args.args[0].name, "主账号")
+
+    def test_login_renew_and_validate_buttons_keep_left_to_right_order(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.show()
+        self.app.processEvents()
+
+        self.assertLess(window.login_button.x(), window.validate_button.x())
+        self.assertLess(window.validate_button.x(), window.renew_button.x())
 
     def test_run_auto_renew_skips_when_background_task_exists(self):
         window = MainWindow()

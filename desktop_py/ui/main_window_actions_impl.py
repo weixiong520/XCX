@@ -85,6 +85,8 @@ def update_action_buttons(window) -> None:
     account = window.accounts[current_indexes[0]] if single_selected else None
     if window.login_button is not None:
         window.login_button.setEnabled(bool(account and account.is_entry_account))
+    if window.renew_button is not None:
+        window.renew_button.setEnabled(bool(account and account.is_entry_account))
     if window.edit_button is not None:
         window.edit_button.setEnabled(bool(account and account.is_entry_account))
     if window.import_button is not None:
@@ -373,6 +375,20 @@ def validate_selected(window, *, validate_account_state_fn) -> None:
     window._run_thread(
         lambda log: validate_account_state_fn(account, log, window.settings.browser_profile_dir),
         on_success=lambda ok: window._mark_validation(account, bool(ok)),
+    )
+
+
+def renew_selected(window, *, renew_account_state_fn) -> None:
+    account = window.selected_account()
+    if not account:
+        window._show_info("提示", "请先选择一个账号。")
+        return
+    if not account.is_entry_account:
+        window._show_info("提示", "导入账号不能登录续期，请选择主账号。")
+        return
+    window._run_thread(
+        lambda log: renew_account_state_fn(account, log, window.settings.browser_profile_dir),
+        on_success=lambda ok: window._mark_auto_renew_result(account, bool(ok)),
     )
 
 

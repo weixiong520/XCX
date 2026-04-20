@@ -35,14 +35,20 @@ class BuildInstallerScriptTestCase(unittest.TestCase):
     def test_installer_preserves_user_data_directories(self):
         content = INSTALLER_ISS_PATH.read_text(encoding="utf-8")
 
-        self.assertIn('[Dirs]', content)
+        self.assertIn("[Dirs]", content)
         self.assertIn('Name: "{app}\\data"', content)
         self.assertIn('Name: "{app}\\storage"', content)
         self.assertIn('Name: "{app}\\browser_profile"', content)
         self.assertIn('Name: "{app}\\output"', content)
         self.assertIn('Excludes: "data\\*,storage\\*,browser_profile\\*,output\\*"', content)
-        self.assertIn('Source: "{#MySourceDir}\\data\\accounts.json"; DestDir: "{app}\\data"; Flags: ignoreversion onlyifdoesntexist', content)
-        self.assertIn('Source: "{#MySourceDir}\\data\\settings.json"; DestDir: "{app}\\data"; Flags: ignoreversion onlyifdoesntexist', content)
+        self.assertIn(
+            'Source: "{#MySourceDir}\\data\\accounts.json"; DestDir: "{app}\\data"; Flags: ignoreversion onlyifdoesntexist',
+            content,
+        )
+        self.assertIn(
+            'Source: "{#MySourceDir}\\data\\settings.json"; DestDir: "{app}\\data"; Flags: ignoreversion onlyifdoesntexist',
+            content,
+        )
 
 
 if __name__ == "__main__":

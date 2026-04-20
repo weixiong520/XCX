@@ -224,6 +224,25 @@ def _fallback_from_responses(responses: list[Any]) -> str:
     return max(candidates, key=lambda item: item[0])[1]
 
 
+def extract_response_token(response_url: str) -> str:
+    return (parse_qs(urlparse(response_url).query).get("token") or [""])[0].strip()
+
+
+def classify_refund_response_type(response_url: str, body: Any) -> str:
+    url = response_url.strip().lower()
+    if "getuserrefundchecklist" in url:
+        if "cid=" in url or "openid=" in url:
+            return "detail"
+        return "list"
+    if "checkuserrefundcheck" in url or "getpayorderlistforuserrefund" in url:
+        return "detail"
+
+    body_text = str(body)
+    if "user_refund_check_list" in body_text:
+        return "detail" if any(keyword in url for keyword in ("cid=", "openid=")) else "list"
+    return "other"
+
+
 def _capture_response_payload(response: Response) -> Any | None:
     content_type = (response.headers.get("content-type") or "").lower()
     if not any(keyword in content_type for keyword in ("json", "javascript", "text")):
@@ -242,11 +261,15 @@ def _capture_response_payload(response: Response) -> Any | None:
     except Exception:
         body = text[:3000]
 
+    response_type = classify_refund_response_type(response.url, body)
     return {
         "url": response.url,
         "status": response.status,
         "content_type": content_type,
         "body": body,
+        "token": extract_response_token(response.url),
+        "response_type": response_type,
+        "captured_at": time.time(),
     }
 
 
