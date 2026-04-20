@@ -18,7 +18,7 @@ from desktop_py.core.fetcher import (
     fetch_account,
     fetch_accounts_batch,
     fetch_switchable_accounts,
-    keep_alive_account_state,
+    renew_account_state,
     save_login_state,
     save_login_state_with_profile,
     validate_account_state,
@@ -55,7 +55,7 @@ from desktop_py.ui.main_window_actions_impl import (
     apply_auto_fetch_push_schedule as apply_auto_fetch_push_schedule_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
-    apply_keep_alive_schedule as apply_keep_alive_schedule_impl,
+    apply_auto_renew_schedule as apply_auto_renew_schedule_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
     auto_fetch_and_send as auto_fetch_and_send_impl,
@@ -88,7 +88,7 @@ from desktop_py.ui.main_window_actions_impl import (
     handle_auto_fetch_push_toggled as handle_auto_fetch_push_toggled_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
-    handle_keep_alive_timeout as handle_keep_alive_timeout_impl,
+    handle_auto_renew_timeout as handle_auto_renew_timeout_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
     handle_selection_changed as handle_selection_changed_impl,
@@ -109,6 +109,9 @@ from desktop_py.ui.main_window_actions_impl import (
     login_start_message as login_start_message_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
+    mark_auto_renew_result as mark_auto_renew_result_impl,
+)
+from desktop_py.ui.main_window_actions_impl import (
     mark_batch_results as mark_batch_results_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
@@ -116,9 +119,6 @@ from desktop_py.ui.main_window_actions_impl import (
 )
 from desktop_py.ui.main_window_actions_impl import (
     mark_fetch_result as mark_fetch_result_impl,
-)
-from desktop_py.ui.main_window_actions_impl import (
-    mark_keep_alive_result as mark_keep_alive_result_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
     mark_login as mark_login_impl,
@@ -139,7 +139,7 @@ from desktop_py.ui.main_window_actions_impl import (
     run_auto_fetch_push as run_auto_fetch_push_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
-    run_keep_alive as run_keep_alive_impl,
+    run_auto_renew as run_auto_renew_impl,
 )
 from desktop_py.ui.main_window_actions_impl import (
     run_thread as run_thread_impl,
@@ -243,7 +243,7 @@ BLOCKED_ACCOUNT_NAMES = {
     "叨空SSR",
 }
 
-KEEP_ALIVE_INTERVAL_MS = 5 * 60 * 60 * 1000
+AUTO_RENEW_INTERVAL_MS = 5 * 60 * 60 * 1000
 ACTUAL_ACCOUNT_PREFIX = "当前实际账号："
 
 
@@ -290,9 +290,9 @@ class MainWindow(QMainWindow):
         self._auto_fetch_timer = QTimer(self)
         self._auto_fetch_timer.setSingleShot(True)
         self._auto_fetch_timer.timeout.connect(self._handle_auto_fetch_push_timeout)
-        self._keep_alive_timer = QTimer(self)
-        self._keep_alive_timer.setSingleShot(True)
-        self._keep_alive_timer.timeout.connect(self._handle_keep_alive_timeout)
+        self._auto_renew_timer = QTimer(self)
+        self._auto_renew_timer.setSingleShot(True)
+        self._auto_renew_timer.timeout.connect(self._handle_auto_renew_timeout)
         self._toggle_action_button_cls = ToggleActionButton
 
         self.setWindowTitle("小程序工具")
@@ -516,22 +516,20 @@ class MainWindow(QMainWindow):
     def _handle_auto_fetch_push_timeout(self) -> None:
         handle_auto_fetch_push_timeout_impl(self)
 
-    def _apply_keep_alive_schedule(self) -> None:
-        apply_keep_alive_schedule_impl(self, keep_alive_interval_ms=KEEP_ALIVE_INTERVAL_MS)
+    def _apply_auto_renew_schedule(self) -> None:
+        apply_auto_renew_schedule_impl(self, auto_renew_interval_ms=AUTO_RENEW_INTERVAL_MS)
 
-    def _handle_keep_alive_timeout(self) -> None:
-        handle_keep_alive_timeout_impl(self)
+    def _handle_auto_renew_timeout(self) -> None:
+        handle_auto_renew_timeout_impl(self)
 
-    def _run_keep_alive(self) -> None:
-        run_keep_alive_impl(
+    def _run_auto_renew(self) -> None:
+        run_auto_renew_impl(
             self,
-            keep_alive_account_state_fn=lambda account, log, profile_dir: keep_alive_account_state(
-                account, log, profile_dir
-            ),
+            renew_account_state_fn=lambda account, log, profile_dir: renew_account_state(account, log, profile_dir),
         )
 
-    def _mark_keep_alive_result(self, account: AccountConfig, valid: bool) -> None:
-        mark_keep_alive_result_impl(self, account, valid, save_accounts_fn=save_accounts)
+    def _mark_auto_renew_result(self, account: AccountConfig, valid: bool) -> None:
+        mark_auto_renew_result_impl(self, account, valid, save_accounts_fn=save_accounts)
 
     def _run_auto_fetch_push(self) -> None:
         run_auto_fetch_push_impl(self)

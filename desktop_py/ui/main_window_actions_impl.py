@@ -18,7 +18,7 @@ def initialize_window_state(
 def schedule_startup_jobs(window, *, timer_cls) -> None:
     timer_cls.singleShot(0, window._auto_validate_entry_account)
     timer_cls.singleShot(0, window._apply_auto_fetch_push_schedule)
-    timer_cls.singleShot(0, window._apply_keep_alive_schedule)
+    timer_cls.singleShot(0, window._apply_auto_renew_schedule)
 
 
 def auto_validate_entry_account(window, *, os_module, validate_account_state_fn) -> None:
@@ -50,7 +50,7 @@ def entry_account(window):
     return next((item for item in window.accounts if item.is_entry_account), None)
 
 
-def account_for_keep_alive(window, candidates: list | None = None):
+def account_for_auto_renew(window, candidates: list | None = None):
     current_entry_account = entry_account(window)
     if current_entry_account is not None:
         return current_entry_account
@@ -466,34 +466,34 @@ def handle_auto_fetch_push_timeout(window) -> None:
     window._run_auto_fetch_push()
 
 
-def apply_keep_alive_schedule(window, *, keep_alive_interval_ms: int) -> None:
-    window._keep_alive_timer.stop()
-    window._keep_alive_timer.start(keep_alive_interval_ms)
+def apply_auto_renew_schedule(window, *, auto_renew_interval_ms: int) -> None:
+    window._auto_renew_timer.stop()
+    window._auto_renew_timer.start(auto_renew_interval_ms)
 
 
-def handle_keep_alive_timeout(window) -> None:
-    window._apply_keep_alive_schedule()
-    window._run_keep_alive()
+def handle_auto_renew_timeout(window) -> None:
+    window._apply_auto_renew_schedule()
+    window._run_auto_renew()
 
 
-def run_keep_alive(window, *, keep_alive_account_state_fn) -> None:
+def run_auto_renew(window, *, renew_account_state_fn) -> None:
     if window._threads:
-        window.append_log("静默保活已跳过：当前存在后台任务。")
+        window.append_log("自动续期已跳过：当前存在后台任务。")
         return
-    account = account_for_keep_alive(window)
+    account = account_for_auto_renew(window)
     if account is None:
-        window.append_log("静默保活已跳过：未配置主账号。")
+        window.append_log("自动续期已跳过：未配置主账号。")
         return
     window._run_thread(
-        lambda log: keep_alive_account_state_fn(account, log, window.settings.browser_profile_dir),
-        on_success=lambda ok: window._mark_keep_alive_result(account, bool(ok)),
+        lambda log: renew_account_state_fn(account, log, window.settings.browser_profile_dir),
+        on_success=lambda ok: window._mark_auto_renew_result(account, bool(ok)),
         update_status=False,
     )
 
 
-def mark_keep_alive_result(window, account, valid: bool, *, save_accounts_fn) -> None:
+def mark_auto_renew_result(window, account, valid: bool, *, save_accounts_fn) -> None:
     account.last_status = "登录有效" if valid else "登录失效"
-    account.last_note = "静默保活成功，可直接抓取" if valid else "静默保活失败，请重新保存登录态"
+    account.last_note = "自动续期成功，可直接抓取" if valid else "自动续期失败，请重新保存登录态"
     save_accounts_fn(window.accounts)
     window.refresh_table()
 

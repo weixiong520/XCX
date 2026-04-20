@@ -169,23 +169,61 @@ def validate_account_state_impl(
             close_context_and_browser_fn(
                 context,
                 browser,
-                state_path=state_path if normalized_profile_dir else None,
-                persist_state=bool(normalized_profile_dir),
+                state_path=None,
+                persist_state=False,
             )
 
     log_fn(logger, f"账号 {account.name} 登录态校验结果：{'有效' if valid else '无效'}")
     return valid
 
 
-def keep_alive_account_state_impl(
+def renew_account_state_impl(
     account: AccountConfig,
     logger: callable | None = None,
     profile_dir: str = "",
     *,
-    validate_account_state_fn,
+    sync_playwright_fn,
+    path_exists_fn,
+    validate_shared_browser_profile_dir_fn,
+    create_browser_context_fn,
+    wait_for_url_contains_fn,
+    close_page_fn,
+    close_context_and_browser_fn,
     log_fn,
 ) -> bool:
-    log_fn(logger, f"开始静默保活账号 {account.name}。")
-    valid = validate_account_state_fn(account, logger, profile_dir)
-    log_fn(logger, f"账号 {account.name} 静默保活{'成功' if valid else '失败'}。")
-    return valid
+    log_fn(logger, f"开始自动续期账号 {account.name}。")
+    normalized_profile_dir = normalize_profile_dir(
+        profile_dir,
+        validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir_fn,
+    )
+    state_path = ensure_account_session_available(
+        account,
+        normalized_profile_dir,
+        path_exists_fn=path_exists_fn,
+        error_cls=None,
+    )
+    if state_path is None:
+        log_fn(logger, f"账号 {account.name} 自动续期失败：缺少可用登录态。")
+        return False
+
+    with sync_playwright_fn() as playwright:
+        browser, context = create_browser_context_fn(playwright, account, True, normalized_profile_dir)
+        page = context.new_page()
+        renewed = False
+        try:
+            page.goto(account.home_url, wait_until="domcontentloaded", timeout=60000)
+            wait_for_url_contains_fn(page, ("token=", "/wxamp/index/index"), timeout_ms=4000)
+            renewed = "token=" in page.url or "/wxamp/index/index" in page.url
+        except PlaywrightTimeoutError:
+            renewed = False
+        finally:
+            close_page_fn(page)
+            close_context_and_browser_fn(
+                context,
+                browser,
+                state_path=state_path if renewed else None,
+                persist_state=renewed,
+            )
+
+    log_fn(logger, f"账号 {account.name} 自动续期{'成功' if renewed else '失败'}。")
+    return renewed

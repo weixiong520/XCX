@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 from desktop_py.core.models import AccountConfig, AppSettings, FetchResult
 from desktop_py.core.store import SHARED_BROWSER_PROFILE_DIR_NAME
 from desktop_py.ui.account_dialog import AccountDialog
-from desktop_py.ui.main_window import KEEP_ALIVE_INTERVAL_MS, MainWindow
+from desktop_py.ui.main_window import AUTO_RENEW_INTERVAL_MS, MainWindow
 
 
 class UiSmokeTestCase(unittest.TestCase):
@@ -732,23 +732,23 @@ class UiSmokeTestCase(unittest.TestCase):
         mock_schedule.assert_called_once()
         mock_run.assert_called_once()
 
-    def test_keep_alive_interval_is_five_hours(self):
-        self.assertEqual(KEEP_ALIVE_INTERVAL_MS, 5 * 60 * 60 * 1000)
+    def test_auto_renew_interval_is_five_hours(self):
+        self.assertEqual(AUTO_RENEW_INTERVAL_MS, 5 * 60 * 60 * 1000)
 
-    def test_handle_keep_alive_timeout_reschedules_and_runs_job(self):
+    def test_handle_auto_renew_timeout_reschedules_and_runs_job(self):
         window = MainWindow()
         self.addCleanup(window.close)
 
         with (
-            patch.object(window, "_apply_keep_alive_schedule") as mock_schedule,
-            patch.object(window, "_run_keep_alive") as mock_run,
+            patch.object(window, "_apply_auto_renew_schedule") as mock_schedule,
+            patch.object(window, "_run_auto_renew") as mock_run,
         ):
-            window._handle_keep_alive_timeout()
+            window._handle_auto_renew_timeout()
 
         mock_schedule.assert_called_once()
         mock_run.assert_called_once()
 
-    def test_run_keep_alive_uses_entry_account(self):
+    def test_run_auto_renew_uses_entry_account(self):
         window = MainWindow()
         self.addCleanup(window.close)
         window.accounts = [
@@ -757,22 +757,22 @@ class UiSmokeTestCase(unittest.TestCase):
         ]
 
         with patch.object(window, "_run_thread") as mock_run_thread:
-            window._run_keep_alive()
+            window._run_auto_renew()
 
         mock_run_thread.assert_called_once()
         job = mock_run_thread.call_args.args[0]
-        with patch("desktop_py.ui.main_window.keep_alive_account_state", return_value=True) as mock_keep_alive:
+        with patch("desktop_py.ui.main_window.renew_account_state", return_value=True) as mock_renew:
             self.assertTrue(job(lambda _message: None))
-        self.assertEqual(mock_keep_alive.call_args.args[0].name, "主账号")
+        self.assertEqual(mock_renew.call_args.args[0].name, "主账号")
 
-    def test_run_keep_alive_skips_when_background_task_exists(self):
+    def test_run_auto_renew_skips_when_background_task_exists(self):
         window = MainWindow()
         self.addCleanup(window.close)
         window._threads.append(object())
         window._update_action_buttons()
 
         with patch.object(window, "_run_thread") as mock_run_thread:
-            window._run_keep_alive()
+            window._run_auto_renew()
 
         mock_run_thread.assert_not_called()
         self.assertIn("当前存在后台任务", window.log_edit.toPlainText())

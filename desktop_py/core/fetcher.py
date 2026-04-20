@@ -34,7 +34,7 @@ from desktop_py.core.fetcher_runtime import (
     update_runtime_current_account_name,
 )
 from desktop_py.core.fetcher_session import (
-    keep_alive_account_state_impl,
+    renew_account_state_impl,
     save_login_state_impl,
     save_login_state_with_profile_impl,
     validate_account_state_impl,
@@ -84,7 +84,7 @@ PUBLIC_FETCHER_API = (
     "fetch_account",
     "fetch_accounts_batch",
     "validate_account_state",
-    "keep_alive_account_state",
+    "renew_account_state",
 )
 
 __all__ = [
@@ -388,11 +388,17 @@ def validate_account_state(account: AccountConfig, logger: callable | None = Non
     )
 
 
-def keep_alive_account_state(account: AccountConfig, logger: callable | None = None, profile_dir: str = "") -> bool:
-    return keep_alive_account_state_impl(
+def renew_account_state(account: AccountConfig, logger: callable | None = None, profile_dir: str = "") -> bool:
+    return renew_account_state_impl(
         account,
         logger=logger,
         profile_dir=profile_dir,
-        validate_account_state_fn=validate_account_state,
+        sync_playwright_fn=sync_playwright,
+        path_exists_fn=Path.exists,
+        validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir,
+        create_browser_context_fn=create_browser_context,
+        wait_for_url_contains_fn=wait_for_url_contains,
+        close_page_fn=_close_page,
+        close_context_and_browser_fn=_close_context_and_browser,
         log_fn=_log,
     )
