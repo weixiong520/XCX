@@ -8,7 +8,6 @@ from pathlib import Path
 
 from desktop_py.core.models import AccountConfig, AppSettings, FetchResult
 
-
 APP_NAME = "小程序工具"
 SHARED_BROWSER_PROFILE_DIR_NAME = "browser_profile"
 BROWSER_PROFILE_LOCK_FILES = (
@@ -103,7 +102,9 @@ def ensure_runtime_dirs() -> None:
     if not ACCOUNTS_FILE.exists():
         ACCOUNTS_FILE.write_text("[]\n", encoding="utf-8")
     if not SETTINGS_FILE.exists():
-        SETTINGS_FILE.write_text(json.dumps(AppSettings().to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        SETTINGS_FILE.write_text(
+            json.dumps(AppSettings().to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
 
 
 def load_accounts() -> list[AccountConfig]:
@@ -115,8 +116,7 @@ def load_accounts() -> list[AccountConfig]:
 def save_accounts(accounts: list[AccountConfig]) -> None:
     ensure_runtime_dirs()
     ACCOUNTS_FILE.write_text(
-        json.dumps([account.to_dict() for account in accounts], ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8"
+        json.dumps([account.to_dict() for account in accounts], ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
 
 

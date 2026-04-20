@@ -1,13 +1,14 @@
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from desktop_py.core.fetcher import (
-    _fallback_from_responses,
+    CancelledError,
     _capture_response_payload,
     _close_context_and_browser,
-    CancelledError,
+    _fallback_from_responses,
     build_feedback_url,
     business_iframe_selector,
     fetch_accounts_batch,
@@ -15,20 +16,22 @@ from desktop_py.core.fetcher import (
     find_switch_entry,
     keep_alive_account_state,
     resolve_bootstrap_url,
-    save_login_state,
     safe_page_content,
-    wait_for_iframe_ready,
-    wait_for_switch_account_items,
-    wait_or_cancel,
-    wait_for_url_contains,
-    wait_for_current_account_name,
-    should_switch_account,
+    save_login_state,
     should_retry_switch_from_home,
+    should_switch_account,
     should_switch_for_account,
     validate_account_state,
+    wait_for_current_account_name,
+    wait_for_iframe_ready,
+    wait_for_switch_account_items,
+    wait_for_url_contains,
+    wait_or_cancel,
 )
 from desktop_py.core.models import AccountConfig
 from desktop_py.core.parser import extract_labeled_datetime
+
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "fetcher"
 
 
 class FakeElementHandle:
@@ -127,7 +130,9 @@ class FakePage:
 
 
 class FakeResponse:
-    def __init__(self, text: str, content_type: str = "application/json", url: str = "https://example.com/api", status: int = 200):
+    def __init__(
+        self, text: str, content_type: str = "application/json", url: str = "https://example.com/api", status: int = 200
+    ):
         self._text = text
         self.headers = {"content-type": content_type}
         self.url = url
@@ -137,12 +142,77 @@ class FakeResponse:
         return self._text
 
 
+class FixturePage:
+    def __init__(self, html: str):
+        self.html = html
+
+    def locator(self, selector, **kwargs):
+        has_text = kwargs.get("has_text")
+        if selector == "div.menu_box_account_info_item[title='切换账号']":
+            return FakeLocator(count=1 if 'title="切换账号"' in self.html else 0)
+        if selector == ".menu_box_account_info_item":
+            if has_text == "切换账号" and "切换账号" in self.html:
+                return FakeLocator(count=1)
+            return FakeLocator()
+        if selector == "[title='切换账号']":
+            return FakeLocator(count=1 if 'title="切换账号"' in self.html else 0)
+        if selector == "#js_iframe":
+            return FakeLocator(count=1 if 'id="js_iframe"' in self.html else 0)
+        if selector == "iframe[src*='gameFeedback']":
+            return FakeLocator(count=1 if "gameFeedback" in self.html else 0)
+        return FakeLocator()
+
+    def get_by_text(self, text, exact=False):
+        if exact and text in self.html:
+            return FakeLocator(count=1)
+        return FakeLocator()
+
+
 class FetcherTestCase(unittest.TestCase):
+    def read_fixture(self, name: str) -> str:
+        return (FIXTURE_ROOT / name).read_text(encoding="utf-8")
+
     def test_build_feedback_url(self):
         url = build_feedback_url("https://mp.weixin.qq.com/wxamp/index/index?lang=zh_CN&token=2056634783")
         self.assertIn("plugin_uin=1010", url)
         self.assertIn("selected=2", url)
         self.assertIn("token=2056634783", url)
+
+    def test_contract_fixture_switch_account_menu_matches_title_selector(self):
+        page = FixturePage(self.read_fixture("switch_account_menu.html"))
+
+        result = find_switch_entry(page)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.count(), 1)
+
+    def test_contract_fixture_extracts_current_account_name_from_page_html(self):
+        page = FakePage()
+        page.set_content_results([self.read_fixture("switch_account_menu.html")])
+
+        with patch(
+            "desktop_py.core.fetcher.safe_page_content", return_value=self.read_fixture("switch_account_menu.html")
+        ):
+            from desktop_py.core.fetcher import extract_current_account_name
+
+            self.assertEqual(extract_current_account_name(page), "主账号")
+
+    def test_contract_fixture_prefers_js_iframe_selector(self):
+        page = FixturePage(self.read_fixture("feedback_page_iframe.html"))
+
+        self.assertEqual(business_iframe_selector(page), "#js_iframe")
+
+    def test_contract_fixture_extracts_deadline_from_detail_text(self):
+        deadline = extract_labeled_datetime(self.read_fixture("detail_frame.txt"), "处理截止时间")
+
+        self.assertEqual(deadline, "2026-04-20 18:00")
+
+    def test_contract_fixture_extracts_deadline_from_response_payload(self):
+        payload = json.loads(self.read_fixture("refund_response.json"))
+
+        deadline = _fallback_from_responses([payload])
+
+        self.assertEqual(deadline, "2026-04-21 10:19:34")
 
     def test_find_switch_entry_prefers_title_selector(self):
         title_locator = FakeLocator(count=1)
@@ -318,7 +388,10 @@ class FetcherTestCase(unittest.TestCase):
         page = FakePage()
         names = ["", "目标账号"]
 
-        with patch("desktop_py.core.fetcher.extract_current_account_name", side_effect=lambda _page: names.pop(0) if len(names) > 1 else names[0]):
+        with patch(
+            "desktop_py.core.fetcher.extract_current_account_name",
+            side_effect=lambda _page: names.pop(0) if len(names) > 1 else names[0],
+        ):
             actual_name = wait_for_current_account_name(page, "目标账号", timeout_ms=1000)
 
         self.assertEqual(actual_name, "目标账号")
@@ -381,7 +454,9 @@ class FetcherTestCase(unittest.TestCase):
         page = FakePage()
         page.set_content_results(
             [
-                RuntimeError("Page.content: Unable to retrieve content because the page is navigating and changing the content."),
+                RuntimeError(
+                    "Page.content: Unable to retrieve content because the page is navigating and changing the content."
+                ),
                 "<html>ok</html>",
             ]
         )
@@ -413,11 +488,15 @@ class FetcherTestCase(unittest.TestCase):
         self.assertEqual(deadline, "2026-04-21 10:19:34")
 
     def test_capture_response_payload_keeps_json_body_for_fallback(self):
-        response = FakeResponse('{"data":{"user_refund_check_list":[{"ctrl_info":{"appeal_deadline_time":"1776737974"}}]}}')
+        response = FakeResponse(
+            '{"data":{"user_refund_check_list":[{"ctrl_info":{"appeal_deadline_time":"1776737974"}}]}}'
+        )
 
         payload = _capture_response_payload(response)
 
-        self.assertEqual(payload["body"]["data"]["user_refund_check_list"][0]["ctrl_info"]["appeal_deadline_time"], "1776737974")
+        self.assertEqual(
+            payload["body"]["data"]["user_refund_check_list"][0]["ctrl_info"]["appeal_deadline_time"], "1776737974"
+        )
 
     def test_offline_response_fixture_extracts_deadline_candidate(self):
         deadline = _fallback_from_responses(
@@ -449,17 +528,22 @@ class FetcherTestCase(unittest.TestCase):
         progress_calls: list[str] = []
         contexts = []
 
-        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
-            "desktop_py.core.fetcher.create_browser_context"
-        ) as mock_create_context, patch(
-            "desktop_py.core.fetcher._fetch_account_in_page",
-            side_effect=lambda page, context, account, logger, profile_dir: type(
-                "Result", (), {"account_name": account.name}
-            )(),
-        ), patch("desktop_py.core.fetcher.Path.exists", return_value=True):
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch("desktop_py.core.fetcher.create_browser_context") as mock_create_context,
+            patch(
+                "desktop_py.core.fetcher._fetch_account_in_page",
+                side_effect=lambda page, context, account, logger, profile_dir: type(
+                    "Result", (), {"account_name": account.name}
+                )(),
+            ),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
             mock_playwright.return_value.__enter__.return_value = object()
             for _ in range(2):
-                fake_context = type("FakeContext", (), {"new_page": lambda self: object(), "close": lambda self: None})()
+                fake_context = type(
+                    "FakeContext", (), {"new_page": lambda self: object(), "close": lambda self: None}
+                )()
                 fake_browser = type("FakeBrowser", (), {"close": lambda self: None})()
                 contexts.append((fake_browser, fake_context))
             mock_create_context.side_effect = contexts
@@ -496,14 +580,17 @@ class FetcherTestCase(unittest.TestCase):
         fake_context = FakeContext()
         fake_browser = type("FakeBrowser", (), {"close": lambda self: None})()
 
-        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
-            "desktop_py.core.fetcher.create_browser_context", return_value=(fake_browser, fake_context)
-        ), patch(
-            "desktop_py.core.fetcher._fetch_account_in_page",
-            side_effect=lambda page, context, account, logger, profile_dir: type(
-                "Result", (), {"account_name": account.name}
-            )(),
-        ), patch("desktop_py.core.fetcher.Path.exists", return_value=True):
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch("desktop_py.core.fetcher.create_browser_context", return_value=(fake_browser, fake_context)),
+            patch(
+                "desktop_py.core.fetcher._fetch_account_in_page",
+                side_effect=lambda page, context, account, logger, profile_dir: type(
+                    "Result", (), {"account_name": account.name}
+                )(),
+            ),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
             mock_playwright.return_value.__enter__.return_value = object()
 
             results = fetch_accounts_batch(accounts)
@@ -571,7 +658,9 @@ class FetcherTestCase(unittest.TestCase):
 
         fake_browser = FakeBrowserForLogin()
         fake_playwright = type(
-            "FakePlaywright", (), {"chromium": type("FakeChromium", (), {"launch": lambda self, headless=False: fake_browser})()}
+            "FakePlaywright",
+            (),
+            {"chromium": type("FakeChromium", (), {"launch": lambda self, headless=False: fake_browser})()},
         )()
 
         with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright:
@@ -622,13 +711,16 @@ class FetcherTestCase(unittest.TestCase):
 
         fake_browser = FakeBrowserForLogin()
         fake_playwright = type(
-            "FakePlaywright", (), {"chromium": type("FakeChromium", (), {"launch": lambda self, headless=False: fake_browser})()}
+            "FakePlaywright",
+            (),
+            {"chromium": type("FakeChromium", (), {"launch": lambda self, headless=False: fake_browser})()},
         )()
 
         timestamps = iter([100.0, 101.0])
-        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
-            "desktop_py.core.fetcher.datetime"
-        ) as mock_datetime:
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch("desktop_py.core.fetcher.datetime") as mock_datetime,
+        ):
             mock_playwright.return_value.__enter__.return_value = fake_playwright
             mock_datetime.now.return_value.timestamp.side_effect = lambda: next(timestamps)
 
@@ -663,15 +755,21 @@ class FetcherTestCase(unittest.TestCase):
             def close(self):
                 calls.append("browser")
 
-        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
-            "desktop_py.core.fetcher.create_browser_context",
-            return_value=(FakeBrowserForSwitch(), FakeContextForSwitch()),
-        ), patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=True), patch(
-            "desktop_py.core.fetcher.list_switchable_accounts", return_value=["账号A", "账号B"]
-        ), patch("desktop_py.core.fetcher.Path.exists", return_value=True):
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                return_value=(FakeBrowserForSwitch(), FakeContextForSwitch()),
+            ),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=True),
+            patch("desktop_py.core.fetcher.list_switchable_accounts", return_value=["账号A", "账号B"]),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
             mock_playwright.return_value.__enter__.return_value = object()
             with self.assertRaisesRegex(RuntimeError, "context close failed"):
-                fetch_switchable_accounts(AccountConfig(name="主账号", state_path="storage/shared.json"), profile_dir="")
+                fetch_switchable_accounts(
+                    AccountConfig(name="主账号", state_path="storage/shared.json"), profile_dir=""
+                )
 
         self.assertEqual(calls, ["page", "context", "browser"])
 
@@ -700,11 +798,14 @@ class FetcherTestCase(unittest.TestCase):
             def close(self):
                 calls.append("context")
 
-        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
-            "desktop_py.core.fetcher.create_browser_context",
-            return_value=(None, FakeContextForValidation()),
-        ), patch("desktop_py.core.fetcher.validate_shared_browser_profile_dir", return_value="C:/profile"), patch(
-            "desktop_py.core.fetcher.wait_for_url_contains", return_value=True
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                return_value=(None, FakeContextForValidation()),
+            ),
+            patch("desktop_py.core.fetcher.validate_shared_browser_profile_dir", return_value="C:/profile"),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=True),
         ):
             mock_playwright.return_value.__enter__.return_value = object()
 
@@ -763,10 +864,11 @@ class FetcherTestCase(unittest.TestCase):
                 raise result
             return result
 
-        with patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright, patch(
-            "desktop_py.core.fetcher.create_browser_context", return_value=(fake_browser, fake_context)
-        ), patch("desktop_py.core.fetcher._fetch_account_in_page", side_effect=fake_fetch), patch(
-            "desktop_py.core.fetcher.Path.exists", return_value=True
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch("desktop_py.core.fetcher.create_browser_context", return_value=(fake_browser, fake_context)),
+            patch("desktop_py.core.fetcher._fetch_account_in_page", side_effect=fake_fetch),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
         ):
             mock_playwright.return_value.__enter__.return_value = object()
             batch_results = fetch_accounts_batch(
@@ -776,6 +878,7 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertEqual([result.account_name for result in batch_results], ["账号A"])
         self.assertEqual(progress_calls, ["账号A"])
+
 
 if __name__ == "__main__":
     unittest.main()

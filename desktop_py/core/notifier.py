@@ -10,11 +10,7 @@ from desktop_py.core.models import FetchResult
 def send_feishu_text(webhook: str, content: str) -> None:
     if not webhook.strip():
         raise ValueError("飞书机器人地址不能为空。")
-    response = requests.post(
-        webhook,
-        json={"msg_type": "text", "content": {"text": content}},
-        timeout=20
-    )
+    response = requests.post(webhook, json={"msg_type": "text", "content": {"text": content}}, timeout=20)
     response.raise_for_status()
 
 

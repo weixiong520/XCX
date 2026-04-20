@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QEventLoop, QTimer, Qt
+from PySide6.QtCore import QEventLoop, Qt, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QMenu, QProgressDialog, QStyle, QSystemTrayIcon
 
@@ -28,7 +28,9 @@ def ensure_browser_runtime(app: QApplication) -> bool:
     loop = QEventLoop()
     result: dict[str, object] = {"ok": False, "output": "未获取到安装日志。"}
     thread = TaskThread(lambda log: install_playwright_browsers(log))
-    thread.message.connect(lambda message: progress.setLabelText(f"首次启动，正在安装 Chromium 浏览器资源，请稍候。\n\n{message}"))
+    thread.message.connect(
+        lambda message: progress.setLabelText(f"首次启动，正在安装 Chromium 浏览器资源，请稍候。\n\n{message}")
+    )
     thread.succeeded.connect(lambda payload: result.update({"ok": bool(payload[0]), "output": payload[1]}))
     thread.succeeded.connect(lambda _payload: loop.quit())
     thread.failed.connect(lambda message: result.update({"ok": False, "output": message}))

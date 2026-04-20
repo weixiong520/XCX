@@ -10,7 +10,6 @@ import playwright
 
 from desktop_py.core.store import runtime_root
 
-
 APP_NAME = "小程序工具"
 DEFAULT_PLAYWRIGHT_DOWNLOAD_TIMEOUT_MS = "120000"
 

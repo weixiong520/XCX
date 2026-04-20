@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 
 def auto_validate_entry_account(window, *, os_module, validate_account_state_fn) -> None:
     if os_module.environ.get("QT_QPA_PLATFORM") == "offscreen":
@@ -145,7 +143,9 @@ def save_current_settings(
             headless_fetch=window.settings.headless_fetch,
             browser_profile_dir=browser_profile_dir,
             current_main_account_name=window.settings.current_main_account_name,
-            auto_fetch_push_enabled=window.auto_fetch_push_switch.isChecked() if window.auto_fetch_push_switch is not None else False,
+            auto_fetch_push_enabled=window.auto_fetch_push_switch.isChecked()
+            if window.auto_fetch_push_switch is not None
+            else False,
         )
         save_settings_fn(window.settings)
     except ValueError as exc:
@@ -183,7 +183,11 @@ def add_account(window, *, account_dialog_cls, default_state_path_fn, save_accou
         account.state_path = default_state_path_fn(window.accounts)
     if not account.feedback_url:
         account.feedback_url = next(
-            (item.feedback_url for item in window.accounts if item.state_path == account.state_path and item.feedback_url),
+            (
+                item.feedback_url
+                for item in window.accounts
+                if item.state_path == account.state_path and item.feedback_url
+            ),
             "",
         )
     window.accounts.append(account)
@@ -207,7 +211,9 @@ def edit_account(window, *, account_dialog_cls, default_state_path_fn, save_acco
     if not updated.name:
         window._show_warning("提示", "账号名称不能为空。")
         return
-    duplicate = any(item.name == updated.name for idx, item in enumerate(window.accounts) if idx != window.selected_index())
+    duplicate = any(
+        item.name == updated.name for idx, item in enumerate(window.accounts) if idx != window.selected_index()
+    )
     if duplicate:
         window._show_warning("提示", f"账号“{updated.name}”已存在。")
         return
@@ -311,7 +317,9 @@ def login_selected(window, *, save_login_state_with_profile_fn, save_login_state
     window.statusBar().showMessage("已打开浏览器，请完成扫码登录。", 8000)
     window._run_thread(
         lambda log, _progress=None, is_cancelled=None: (
-            save_login_state_with_profile_fn(account, window.settings.login_wait_seconds, window.settings.browser_profile_dir, log, is_cancelled)
+            save_login_state_with_profile_fn(
+                account, window.settings.login_wait_seconds, window.settings.browser_profile_dir, log, is_cancelled
+            )
             if window.settings.browser_profile_dir.strip()
             else save_login_state_fn(account, window.settings.login_wait_seconds, log, is_cancelled)
         ),
@@ -557,12 +565,15 @@ def send_summary_with_webhook(
         fetch_result_cls(
             account_name=account.name,
             ok=account.last_status == "抓取成功",
-            actual_account_name=actual_account_name_from_note(account.last_note, actual_account_prefix=actual_account_prefix),
+            actual_account_name=actual_account_name_from_note(
+                account.last_note, actual_account_prefix=actual_account_prefix
+            ),
             deadline_text=account.last_deadline,
             note=account.last_note,
             page_url=account.home_url,
         )
-        for account in window.accounts if account.enabled
+        for account in window.accounts
+        if account.enabled
     ]
     window._run_thread(
         lambda _log: send_feishu_text_fn(webhook, build_summary_fn(results)),
@@ -578,7 +589,16 @@ def actual_account_name_from_note(note: str, *, actual_account_prefix: str) -> s
     return ""
 
 
-def run_thread(window, job_builder, on_success, *, emit_log: bool = True, emit_failure_log: bool = True, update_status: bool = True, on_progress=None) -> None:
+def run_thread(
+    window,
+    job_builder,
+    on_success,
+    *,
+    emit_log: bool = True,
+    emit_failure_log: bool = True,
+    update_status: bool = True,
+    on_progress=None,
+) -> None:
     window._task_runner.run(
         job_builder,
         on_success,

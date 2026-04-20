@@ -1,0 +1,14 @@
+{
+  "body": {
+    "data": {
+      "user_refund_check_list": [
+        {
+          "ctrl_info": {
+            "deadline_time": "1776147849",
+            "appeal_deadline_time": "1776737974"
+          }
+        }
+      ]
+    }
+  }
+}

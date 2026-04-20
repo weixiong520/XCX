@@ -42,10 +42,12 @@ def main() -> int:
         return 0
 
     if args.command == "notify":
-        summary = build_summary([
-            fetch_account(account, 0, settings.headless_fetch, print)
-            for account in enabled_imported_accounts(accounts)
-        ])
+        summary = build_summary(
+            [
+                fetch_account(account, 0, settings.headless_fetch, print)
+                for account in enabled_imported_accounts(accounts)
+            ]
+        )
         send_feishu_text(settings.feishu_webhook, summary)
         print("飞书消息已发送")
         return 0

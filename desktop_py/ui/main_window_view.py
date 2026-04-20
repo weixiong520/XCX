@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import QEvent, QTimer, Qt
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
     QGridLayout,
-    QHeaderView,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
-    QPushButton,
     QPlainTextEdit,
+    QPushButton,
     QSizePolicy,
     QTableWidgetItem,
     QVBoxLayout,
@@ -190,7 +190,10 @@ def build_settings_box(window) -> QWidget:
 
 
 def event_filter(window, watched, event, super_event_filter) -> bool:
-    if watched in {window.profile_dir_edit, window.browse_profile_button} and event.type() in {QEvent.Type.FocusIn, QEvent.Type.FocusOut}:
+    if watched in {window.profile_dir_edit, window.browse_profile_button} and event.type() in {
+        QEvent.Type.FocusIn,
+        QEvent.Type.FocusOut,
+    }:
         QTimer.singleShot(0, window._sync_browse_profile_button_state)
     return super_event_filter(watched, event)
 
@@ -517,11 +520,7 @@ def refresh_summary_cards(window) -> None:
     imported_accounts = [account for account in window.accounts if not account.is_entry_account]
     total = len(imported_accounts)
     enabled = sum(1 for account in imported_accounts if account.enabled)
-    healthy = sum(
-        1
-        for account in imported_accounts
-        if account.last_status in {"抓取成功", "登录有效", "已保存登录态"}
-    )
+    healthy = sum(1 for account in imported_accounts if account.last_status in {"抓取成功", "登录有效", "已保存登录态"})
     recent_times = [account.last_fetch_at for account in imported_accounts if account.last_fetch_at]
     recent = max(recent_times) if recent_times else "暂无"
 

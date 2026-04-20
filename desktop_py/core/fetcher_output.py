@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 
 
-def write_fetch_artifacts(output_dir: Path, *, page_html: str, frame_html: str, frame_text: str, captures: list) -> None:
+def write_fetch_artifacts(
+    output_dir: Path, *, page_html: str, frame_html: str, frame_text: str, captures: list
+) -> None:
     (output_dir / "page.html").write_text(page_html, encoding="utf-8")
     (output_dir / "iframe.html").write_text(frame_html, encoding="utf-8")
     (output_dir / "iframe.txt").write_text(frame_text, encoding="utf-8")

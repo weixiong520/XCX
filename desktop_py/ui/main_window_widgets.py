@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen
 from PySide6.QtWidgets import QPushButton, QStyle, QStyledItemDelegate, QTableWidget, QWidget
 
@@ -42,7 +42,9 @@ class RowHighlightDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option, index) -> None:
         table = self.parent()
         row = index.row()
-        selected_rows = {item.row() for item in table.selectionModel().selectedRows()} if table.selectionModel() else set()
+        selected_rows = (
+            {item.row() for item in table.selectionModel().selectedRows()} if table.selectionModel() else set()
+        )
 
         default_bg = QColor("#ffffff")
         alt_bg = QColor("#f7fafe")

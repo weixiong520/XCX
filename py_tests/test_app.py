@@ -40,25 +40,30 @@ class AppTestCase(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_ensure_browser_runtime_skips_install_when_ready(self):
-        with patch("desktop_py.app.playwright_browsers_ready", return_value=True), patch(
-            "desktop_py.app.install_playwright_browsers"
-        ) as mock_install:
+        with (
+            patch("desktop_py.app.playwright_browsers_ready", return_value=True),
+            patch("desktop_py.app.install_playwright_browsers") as mock_install,
+        ):
             self.assertTrue(ensure_browser_runtime(self.app))
 
         mock_install.assert_not_called()
 
     def test_ensure_browser_runtime_shows_warning_when_install_fails(self):
-        with patch("desktop_py.app.playwright_browsers_ready", return_value=False), patch(
-            "desktop_py.app.TaskThread", side_effect=lambda job: FakeTaskThread(job, should_fail=True)
-        ), patch("desktop_py.app.MessageDialog.show_warning") as mock_warning:
+        with (
+            patch("desktop_py.app.playwright_browsers_ready", return_value=False),
+            patch("desktop_py.app.TaskThread", side_effect=lambda job: FakeTaskThread(job, should_fail=True)),
+            patch("desktop_py.app.MessageDialog.show_warning") as mock_warning,
+        ):
             self.assertFalse(ensure_browser_runtime(self.app))
 
         mock_warning.assert_called_once()
 
     def test_ensure_browser_runtime_runs_install_in_background_thread(self):
-        with patch("desktop_py.app.playwright_browsers_ready", return_value=False), patch(
-            "desktop_py.app.TaskThread", side_effect=lambda job: FakeTaskThread(job)
-        ), patch("desktop_py.app.install_playwright_browsers", return_value=(True, "ok")) as mock_install:
+        with (
+            patch("desktop_py.app.playwright_browsers_ready", return_value=False),
+            patch("desktop_py.app.TaskThread", side_effect=lambda job: FakeTaskThread(job)),
+            patch("desktop_py.app.install_playwright_browsers", return_value=(True, "ok")) as mock_install,
+        ):
             self.assertTrue(ensure_browser_runtime(self.app))
 
         mock_install.assert_called_once()

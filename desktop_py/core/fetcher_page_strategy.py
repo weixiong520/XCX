@@ -68,7 +68,9 @@ def build_empty_refund_result(
 ) -> FetchResult:
     page_html = safe_page_content_fn(page)
     frame_html = frame_locator.locator("body").inner_html(timeout=15000)
-    write_fetch_artifacts(output_dir, page_html=page_html, frame_html=frame_html, frame_text=list_text, captures=captures)
+    write_fetch_artifacts(
+        output_dir, page_html=page_html, frame_html=frame_html, frame_text=list_text, captures=captures
+    )
     actual_account_name = extract_current_account_name_fn(page)
     if profile_dir.strip():
         persist_storage_state(context, account.state_path)
@@ -114,7 +116,9 @@ def build_detail_result(
         deadline_text = _fallback_from_responses(captures)
 
     page_html = safe_page_content_fn(page)
-    write_fetch_artifacts(output_dir, page_html=page_html, frame_html=frame_html, frame_text=frame_text, captures=captures)
+    write_fetch_artifacts(
+        output_dir, page_html=page_html, frame_html=frame_html, frame_text=frame_text, captures=captures
+    )
 
     if not deadline_text:
         raise FetchError("未在详情页文本中提取到处理截止时间。")

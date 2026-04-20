@@ -36,16 +36,22 @@ class BrowserRuntimeTestCase(unittest.TestCase):
             for name in ("chromium-1208", "chromium_headless_shell-1208", "ffmpeg-1011"):
                 (root / name).mkdir()
 
-            with patch("desktop_py.core.browser_runtime.configure_playwright_environment", return_value=root), patch(
-                "desktop_py.core.browser_runtime.required_browser_directories",
-                return_value=["chromium-1208", "chromium_headless_shell-1208", "ffmpeg-1011"],
+            with (
+                patch("desktop_py.core.browser_runtime.configure_playwright_environment", return_value=root),
+                patch(
+                    "desktop_py.core.browser_runtime.required_browser_directories",
+                    return_value=["chromium-1208", "chromium_headless_shell-1208", "ffmpeg-1011"],
+                ),
             ):
                 self.assertTrue(playwright_browsers_ready())
 
             (root / "ffmpeg-1011").rmdir()
-            with patch("desktop_py.core.browser_runtime.configure_playwright_environment", return_value=root), patch(
-                "desktop_py.core.browser_runtime.required_browser_directories",
-                return_value=["chromium-1208", "chromium_headless_shell-1208", "ffmpeg-1011"],
+            with (
+                patch("desktop_py.core.browser_runtime.configure_playwright_environment", return_value=root),
+                patch(
+                    "desktop_py.core.browser_runtime.required_browser_directories",
+                    return_value=["chromium-1208", "chromium_headless_shell-1208", "ffmpeg-1011"],
+                ),
             ):
                 self.assertFalse(playwright_browsers_ready())
 
@@ -77,13 +83,16 @@ class BrowserRuntimeTestCase(unittest.TestCase):
             self.assertEqual(env["PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT"], DEFAULT_PLAYWRIGHT_DOWNLOAD_TIMEOUT_MS)
 
     def test_playwright_install_environment_keeps_custom_mirror(self):
-        with TemporaryDirectory() as temp_dir, patch.dict(
-            "desktop_py.core.browser_runtime.os.environ",
-            {
-                "PLAYWRIGHT_DOWNLOAD_HOST": "https://example.com/playwright",
-                "PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT": "300000",
-            },
-            clear=True,
+        with (
+            TemporaryDirectory() as temp_dir,
+            patch.dict(
+                "desktop_py.core.browser_runtime.os.environ",
+                {
+                    "PLAYWRIGHT_DOWNLOAD_HOST": "https://example.com/playwright",
+                    "PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT": "300000",
+                },
+                clear=True,
+            ),
         ):
             env = playwright_install_environment(Path(temp_dir) / "ms-playwright")
 
@@ -91,10 +100,13 @@ class BrowserRuntimeTestCase(unittest.TestCase):
             self.assertEqual(env["PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT"], "300000")
 
     def test_playwright_install_environment_keeps_chromium_specific_mirror(self):
-        with TemporaryDirectory() as temp_dir, patch.dict(
-            "desktop_py.core.browser_runtime.os.environ",
-            {"PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST": "https://example.com/chromium"},
-            clear=True,
+        with (
+            TemporaryDirectory() as temp_dir,
+            patch.dict(
+                "desktop_py.core.browser_runtime.os.environ",
+                {"PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST": "https://example.com/chromium"},
+                clear=True,
+            ),
         ):
             env = playwright_install_environment(Path(temp_dir) / "ms-playwright")
 
@@ -109,10 +121,14 @@ class BrowserRuntimeTestCase(unittest.TestCase):
             return True, "ok"
 
         logs: list[str] = []
-        with TemporaryDirectory() as temp_dir, patch(
-            "desktop_py.core.browser_runtime.configure_playwright_environment",
-            return_value=Path(temp_dir) / "ms-playwright",
-        ), patch("desktop_py.core.browser_runtime._run_playwright_install", side_effect=fake_run):
+        with (
+            TemporaryDirectory() as temp_dir,
+            patch(
+                "desktop_py.core.browser_runtime.configure_playwright_environment",
+                return_value=Path(temp_dir) / "ms-playwright",
+            ),
+            patch("desktop_py.core.browser_runtime._run_playwright_install", side_effect=fake_run),
+        ):
             ok, output = install_playwright_browsers(logs.append)
 
         self.assertTrue(ok)

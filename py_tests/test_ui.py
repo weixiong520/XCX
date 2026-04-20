@@ -32,11 +32,17 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertEqual(window._summary_labels["total"].text(), str(expected_total))
         self.assertGreaterEqual(window.table.minimumHeight(), 360)
         self.assertEqual(window.statusBar().currentMessage(), "就绪")
-        self.assertIn("退款反馈抓取工作台", window.findChild(type(window._status_label), "heroTitle").text() if window.findChild(type(window._status_label), "heroTitle") else "退款反馈抓取工作台")
+        self.assertIn(
+            "退款反馈抓取工作台",
+            window.findChild(type(window._status_label), "heroTitle").text()
+            if window.findChild(type(window._status_label), "heroTitle")
+            else "退款反馈抓取工作台",
+        )
 
     def test_auto_fetch_push_switch_uses_saved_setting(self):
-        with patch("desktop_py.ui.main_window.load_settings", return_value=AppSettings(auto_fetch_push_enabled=True)), patch(
-            "desktop_py.ui.main_window.save_settings"
+        with (
+            patch("desktop_py.ui.main_window.load_settings", return_value=AppSettings(auto_fetch_push_enabled=True)),
+            patch("desktop_py.ui.main_window.save_settings"),
         ):
             window = MainWindow()
             self.addCleanup(window.close)
@@ -58,7 +64,9 @@ class UiSmokeTestCase(unittest.TestCase):
             window = MainWindow()
             self.addCleanup(window.close)
             window.accounts = [
-                AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True, last_status="登录有效"),
+                AccountConfig(
+                    name="主账号", state_path="storage/shared.json", is_entry_account=True, last_status="登录有效"
+                ),
             ]
 
             with patch.object(window, "_run_thread") as mock_run_thread:
@@ -113,7 +121,10 @@ class UiSmokeTestCase(unittest.TestCase):
         fake_app = FakeApp()
         window.tray_icon = fake_tray
 
-        with patch("desktop_py.ui.main_window.QApplication.instance", return_value=fake_app), patch.object(window, "close") as mock_close:
+        with (
+            patch("desktop_py.ui.main_window.QApplication.instance", return_value=fake_app),
+            patch.object(window, "close") as mock_close,
+        ):
             window.request_exit()
 
         self.assertTrue(window._allow_close)
@@ -125,9 +136,28 @@ class UiSmokeTestCase(unittest.TestCase):
         window = MainWindow()
         self.addCleanup(window.close)
         window.accounts = [
-            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True, enabled=True, last_status="登录有效"),
-            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True, last_status="抓取成功", last_fetch_at="2026-04-17 20:18:46"),
-            AccountConfig(name="导入账号B", state_path="storage/shared.json", is_entry_account=False, enabled=False, last_status="抓取失败"),
+            AccountConfig(
+                name="主账号",
+                state_path="storage/shared.json",
+                is_entry_account=True,
+                enabled=True,
+                last_status="登录有效",
+            ),
+            AccountConfig(
+                name="导入账号A",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                enabled=True,
+                last_status="抓取成功",
+                last_fetch_at="2026-04-17 20:18:46",
+            ),
+            AccountConfig(
+                name="导入账号B",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                enabled=False,
+                last_status="抓取失败",
+            ),
         ]
 
         window.refresh_table()
@@ -141,7 +171,9 @@ class UiSmokeTestCase(unittest.TestCase):
         window = MainWindow()
         self.addCleanup(window.close)
         window.accounts = [
-            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True, last_status="登录有效"),
+            AccountConfig(
+                name="主账号", state_path="storage/shared.json", is_entry_account=True, last_status="登录有效"
+            ),
         ]
 
         window.refresh_table()
@@ -163,7 +195,14 @@ class UiSmokeTestCase(unittest.TestCase):
         window = MainWindow()
         self.addCleanup(window.close)
         window.accounts = [
-            AccountConfig(name="导入账号", state_path="storage/shared.json", is_entry_account=False, last_status="抓取成功", last_deadline="", last_note="当前账号无待处理申请。"),
+            AccountConfig(
+                name="导入账号",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                last_status="抓取成功",
+                last_deadline="",
+                last_note="当前账号无待处理申请。",
+            ),
         ]
 
         window.refresh_table()
@@ -176,7 +215,13 @@ class UiSmokeTestCase(unittest.TestCase):
         window = MainWindow()
         self.addCleanup(window.close)
         window.accounts = [
-            AccountConfig(name="导入账号", state_path="storage/shared.json", is_entry_account=False, last_status="抓取失败", last_note="切换账号列表中未找到目标账号"),
+            AccountConfig(
+                name="导入账号",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                last_status="抓取失败",
+                last_note="切换账号列表中未找到目标账号",
+            ),
         ]
 
         window.refresh_table()
@@ -190,7 +235,13 @@ class UiSmokeTestCase(unittest.TestCase):
         self.addCleanup(window.close)
         reason = "页面未出现业务 iframe，可能是链接失效、无权限或登录态失效。"
         window.accounts = [
-            AccountConfig(name="导入账号", state_path="storage/shared.json", is_entry_account=False, last_status="抓取失败", last_note=reason),
+            AccountConfig(
+                name="导入账号",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                last_status="抓取失败",
+                last_note=reason,
+            ),
         ]
 
         window.refresh_table()
@@ -264,7 +315,10 @@ class UiSmokeTestCase(unittest.TestCase):
         window.refresh_table()
         window.table.selectRow(1)
 
-        with patch.object(window, "_show_info") as mock_information, patch.object(window, "_run_thread") as mock_run_thread:
+        with (
+            patch.object(window, "_show_info") as mock_information,
+            patch.object(window, "_run_thread") as mock_run_thread,
+        ):
             window.login_selected()
 
         mock_information.assert_called_once()
@@ -390,7 +444,10 @@ class UiSmokeTestCase(unittest.TestCase):
         window.refresh_table()
         window.table.selectRow(1)
 
-        with patch.object(window, "_show_info") as mock_information, patch.object(window, "_run_thread") as mock_run_thread:
+        with (
+            patch.object(window, "_show_info") as mock_information,
+            patch.object(window, "_run_thread") as mock_run_thread,
+        ):
             window.validate_selected()
 
         mock_information.assert_called_once()
@@ -407,7 +464,10 @@ class UiSmokeTestCase(unittest.TestCase):
         window.refresh_table()
         window.table.selectRow(1)
 
-        with patch.object(window, "_show_info") as mock_information, patch.object(window, "_run_thread") as mock_run_thread:
+        with (
+            patch.object(window, "_show_info") as mock_information,
+            patch.object(window, "_run_thread") as mock_run_thread,
+        ):
             window.import_accounts()
 
         mock_information.assert_called_once()
@@ -419,11 +479,21 @@ class UiSmokeTestCase(unittest.TestCase):
         self.addCleanup(window.close)
         window.accounts = [
             AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
-            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True, last_status="抓取成功", last_deadline="2026-04-20 11:42:31"),
+            AccountConfig(
+                name="导入账号A",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                enabled=True,
+                last_status="抓取成功",
+                last_deadline="2026-04-20 11:42:31",
+            ),
         ]
         window.webhook_edit.setText("https://open.feishu.cn/open-apis/bot/v2/hook/demo")
 
-        with patch("desktop_py.ui.main_window.save_settings") as mock_save_settings, patch.object(window, "_run_thread") as mock_run_thread:
+        with (
+            patch("desktop_py.ui.main_window.save_settings") as mock_save_settings,
+            patch.object(window, "_run_thread") as mock_run_thread,
+        ):
             window.send_summary()
 
         mock_save_settings.assert_not_called()
@@ -454,8 +524,9 @@ class UiSmokeTestCase(unittest.TestCase):
             window._send_summary_with_webhook("https://example.com/hook")
 
         job = mock_run_thread.call_args.args[0]
-        with patch("desktop_py.ui.main_window.build_summary", side_effect=fake_build_summary), patch(
-            "desktop_py.ui.main_window.send_feishu_text"
+        with (
+            patch("desktop_py.ui.main_window.build_summary", side_effect=fake_build_summary),
+            patch("desktop_py.ui.main_window.send_feishu_text"),
         ):
             job(lambda _message: None)
         self.assertEqual(captured_results[0].actual_account_name, "实际账号A")
@@ -517,7 +588,9 @@ class UiSmokeTestCase(unittest.TestCase):
         window.show()
         self.app.processEvents()
 
-        auto_fetch_button = next(button for button in window.findChildren(type(window.login_button)) if button.text() == "抓取并推送")
+        auto_fetch_button = next(
+            button for button in window.findChildren(type(window.login_button)) if button.text() == "抓取并推送"
+        )
         self.assertIsNotNone(window.send_summary_button)
         self.assertIsNotNone(window.auto_fetch_push_switch)
         self.assertGreater(auto_fetch_button.x(), window.send_summary_button.x())
@@ -528,7 +601,10 @@ class UiSmokeTestCase(unittest.TestCase):
         self.addCleanup(window.close)
         window.auto_fetch_push_switch.setChecked(False)
 
-        with patch("desktop_py.ui.main_window.save_settings") as mock_save_settings, patch.object(window, "_apply_auto_fetch_push_schedule") as mock_schedule:
+        with (
+            patch("desktop_py.ui.main_window.save_settings") as mock_save_settings,
+            patch.object(window, "_apply_auto_fetch_push_schedule") as mock_schedule,
+        ):
             window.auto_fetch_push_switch.setChecked(True)
 
         self.assertTrue(window.settings.auto_fetch_push_enabled)
@@ -540,9 +616,16 @@ class UiSmokeTestCase(unittest.TestCase):
         self.addCleanup(window.close)
         window.profile_dir_edit.setText("C:/Users/Tester/AppData/Local/Google/Chrome/User Data")
 
-        with patch("desktop_py.ui.main_window.validate_shared_browser_profile_dir", side_effect=ValueError("共享浏览器资料目录不能直接指向 Chrome 或 Edge 的默认用户资料目录，请改用专用自动化目录。")), patch(
-            "desktop_py.ui.main_window.save_settings"
-        ) as mock_save_settings, patch.object(window, "_show_warning") as mock_warning:
+        with (
+            patch(
+                "desktop_py.ui.main_window.validate_shared_browser_profile_dir",
+                side_effect=ValueError(
+                    "共享浏览器资料目录不能直接指向 Chrome 或 Edge 的默认用户资料目录，请改用专用自动化目录。"
+                ),
+            ),
+            patch("desktop_py.ui.main_window.save_settings") as mock_save_settings,
+            patch.object(window, "_show_warning") as mock_warning,
+        ):
             window.save_current_settings()
 
         mock_save_settings.assert_not_called()
@@ -554,8 +637,9 @@ class UiSmokeTestCase(unittest.TestCase):
         self.addCleanup(window.close)
         window.settings.headless_fetch = False
 
-        with patch("desktop_py.ui.main_window.validate_shared_browser_profile_dir", return_value=""), patch(
-            "desktop_py.ui.main_window.save_settings"
+        with (
+            patch("desktop_py.ui.main_window.validate_shared_browser_profile_dir", return_value=""),
+            patch("desktop_py.ui.main_window.save_settings"),
         ):
             window.save_current_settings()
 
@@ -566,9 +650,10 @@ class UiSmokeTestCase(unittest.TestCase):
             window = MainWindow()
         self.addCleanup(window.close)
 
-        with patch("desktop_py.ui.main_window.validate_shared_browser_profile_dir", return_value=""), patch(
-            "desktop_py.ui.main_window.save_settings"
-        ) as mock_save_settings:
+        with (
+            patch("desktop_py.ui.main_window.validate_shared_browser_profile_dir", return_value=""),
+            patch("desktop_py.ui.main_window.save_settings") as mock_save_settings,
+        ):
             window.save_current_settings()
 
         self.assertEqual(window.settings.login_wait_seconds, 45)
@@ -578,9 +663,12 @@ class UiSmokeTestCase(unittest.TestCase):
         window = MainWindow()
         self.addCleanup(window.close)
 
-        with TemporaryDirectory() as temp_dir, patch(
-            "desktop_py.ui.main_window.QFileDialog.getExistingDirectory",
-            return_value=temp_dir,
+        with (
+            TemporaryDirectory() as temp_dir,
+            patch(
+                "desktop_py.ui.main_window.QFileDialog.getExistingDirectory",
+                return_value=temp_dir,
+            ),
         ):
             window.choose_profile_dir()
 
@@ -618,7 +706,10 @@ class UiSmokeTestCase(unittest.TestCase):
         window = MainWindow()
         self.addCleanup(window.close)
 
-        with patch.object(window, "_apply_auto_fetch_push_schedule") as mock_schedule, patch.object(window, "_run_auto_fetch_push") as mock_run:
+        with (
+            patch.object(window, "_apply_auto_fetch_push_schedule") as mock_schedule,
+            patch.object(window, "_run_auto_fetch_push") as mock_run,
+        ):
             window._handle_auto_fetch_push_timeout()
 
         mock_schedule.assert_called_once()
@@ -631,7 +722,10 @@ class UiSmokeTestCase(unittest.TestCase):
         window = MainWindow()
         self.addCleanup(window.close)
 
-        with patch.object(window, "_apply_keep_alive_schedule") as mock_schedule, patch.object(window, "_run_keep_alive") as mock_run:
+        with (
+            patch.object(window, "_apply_keep_alive_schedule") as mock_schedule,
+            patch.object(window, "_run_keep_alive") as mock_run,
+        ):
             window._handle_keep_alive_timeout()
 
         mock_schedule.assert_called_once()
@@ -770,7 +864,10 @@ class UiSmokeTestCase(unittest.TestCase):
         window.refresh_table()
         window.select_imported_accounts()
 
-        with patch("desktop_py.ui.main_window.MessageDialog.ask_confirm", return_value=True) as mock_confirm, patch("desktop_py.ui.main_window.save_accounts") as mock_save:
+        with (
+            patch("desktop_py.ui.main_window.MessageDialog.ask_confirm", return_value=True) as mock_confirm,
+            patch("desktop_py.ui.main_window.save_accounts") as mock_save,
+        ):
             window.delete_account()
 
         self.assertEqual([account.name for account in window.accounts], ["主账号"])
@@ -787,7 +884,10 @@ class UiSmokeTestCase(unittest.TestCase):
         window.refresh_table()
         window.table.selectRow(1)
 
-        with patch("desktop_py.ui.main_window.MessageDialog.ask_confirm", return_value=False) as mock_confirm, patch("desktop_py.ui.main_window.save_accounts") as mock_save:
+        with (
+            patch("desktop_py.ui.main_window.MessageDialog.ask_confirm", return_value=False) as mock_confirm,
+            patch("desktop_py.ui.main_window.save_accounts") as mock_save,
+        ):
             window.delete_account()
 
         self.assertEqual([account.name for account in window.accounts], ["主账号", "导入账号A"])
@@ -804,7 +904,10 @@ class UiSmokeTestCase(unittest.TestCase):
         window.refresh_table()
         window.table.selectRow(0)
 
-        with patch.object(window, "_show_info") as mock_information, patch.object(window, "_run_thread") as mock_run_thread:
+        with (
+            patch.object(window, "_show_info") as mock_information,
+            patch.object(window, "_run_thread") as mock_run_thread,
+        ):
             window.fetch_selected()
 
         mock_information.assert_called_once()
@@ -833,7 +936,10 @@ class UiSmokeTestCase(unittest.TestCase):
             AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True, enabled=True),
         ]
 
-        with patch.object(window, "_show_info") as mock_information, patch.object(window, "_run_thread") as mock_run_thread:
+        with (
+            patch.object(window, "_show_info") as mock_information,
+            patch.object(window, "_run_thread") as mock_run_thread,
+        ):
             window.fetch_all()
 
         mock_information.assert_called_once()
@@ -859,9 +965,23 @@ class UiSmokeTestCase(unittest.TestCase):
         self.addCleanup(window.close)
         window.accounts = [
             AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
-            AccountConfig(name="无截止账号", state_path="storage/shared.json", is_entry_account=False, last_status="抓取成功"),
-            AccountConfig(name="较远截止账号", state_path="storage/shared.json", is_entry_account=False, last_status="抓取成功", last_deadline="2026-04-25 12:00:00"),
-            AccountConfig(name="较近截止账号", state_path="storage/shared.json", is_entry_account=False, last_status="抓取成功", last_deadline="2026-04-19 09:00:00"),
+            AccountConfig(
+                name="无截止账号", state_path="storage/shared.json", is_entry_account=False, last_status="抓取成功"
+            ),
+            AccountConfig(
+                name="较远截止账号",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                last_status="抓取成功",
+                last_deadline="2026-04-25 12:00:00",
+            ),
+            AccountConfig(
+                name="较近截止账号",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                last_status="抓取成功",
+                last_deadline="2026-04-19 09:00:00",
+            ),
         ]
 
         window.refresh_table()
@@ -950,9 +1070,12 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertEqual(window.table.item(0, 1).text(), "--")
 
     def test_init_clears_persisted_current_main_account_name(self):
-        with patch("desktop_py.ui.main_window.load_settings", return_value=AppSettings(current_main_account_name="强强")), patch(
-            "desktop_py.ui.main_window.save_settings"
-        ) as mock_save_settings:
+        with (
+            patch(
+                "desktop_py.ui.main_window.load_settings", return_value=AppSettings(current_main_account_name="强强")
+            ),
+            patch("desktop_py.ui.main_window.save_settings") as mock_save_settings,
+        ):
             window = MainWindow()
             self.addCleanup(window.close)
 

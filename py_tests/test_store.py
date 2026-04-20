@@ -31,7 +31,10 @@ class StoreTestCase(unittest.TestCase):
             settings_path = Path(temp_dir) / "settings.json"
             settings_path.write_text('{"feishu_webhook":"demo"}\n', encoding="utf-8")
 
-            with patch("desktop_py.core.store.SETTINGS_FILE", settings_path), patch("desktop_py.core.store.ensure_runtime_dirs"):
+            with (
+                patch("desktop_py.core.store.SETTINGS_FILE", settings_path),
+                patch("desktop_py.core.store.ensure_runtime_dirs"),
+            ):
                 settings = load_settings()
 
         self.assertFalse(settings.auto_fetch_push_enabled)
@@ -41,7 +44,10 @@ class StoreTestCase(unittest.TestCase):
             settings_path = Path(temp_dir) / "settings.json"
             settings_path.write_text('{"feishu_webhook":"demo"}\n', encoding="utf-8-sig")
 
-            with patch("desktop_py.core.store.SETTINGS_FILE", settings_path), patch("desktop_py.core.store.ensure_runtime_dirs"):
+            with (
+                patch("desktop_py.core.store.SETTINGS_FILE", settings_path),
+                patch("desktop_py.core.store.ensure_runtime_dirs"),
+            ):
                 settings = load_settings()
 
         self.assertEqual(settings.feishu_webhook, "demo")
@@ -51,7 +57,10 @@ class StoreTestCase(unittest.TestCase):
             settings_path = Path(temp_dir) / "settings.json"
             settings_path.write_text('{"login_wait_seconds":45}\n', encoding="utf-8")
 
-            with patch("desktop_py.core.store.SETTINGS_FILE", settings_path), patch("desktop_py.core.store.ensure_runtime_dirs"):
+            with (
+                patch("desktop_py.core.store.SETTINGS_FILE", settings_path),
+                patch("desktop_py.core.store.ensure_runtime_dirs"),
+            ):
                 settings = load_settings()
 
         self.assertEqual(settings.login_wait_seconds, 45)
@@ -61,7 +70,10 @@ class StoreTestCase(unittest.TestCase):
             accounts_path = Path(temp_dir) / "accounts.json"
             accounts_path.write_text('[{"name":"测试账号","state_path":"storage/test.json"}]\n', encoding="utf-8-sig")
 
-            with patch("desktop_py.core.store.ACCOUNTS_FILE", accounts_path), patch("desktop_py.core.store.ensure_runtime_dirs"):
+            with (
+                patch("desktop_py.core.store.ACCOUNTS_FILE", accounts_path),
+                patch("desktop_py.core.store.ensure_runtime_dirs"),
+            ):
                 accounts = load_accounts()
 
         self.assertEqual(accounts[0].name, "测试账号")
@@ -71,7 +83,10 @@ class StoreTestCase(unittest.TestCase):
             settings_path = Path(temp_dir) / "settings.json"
             settings_path.write_text("{}\n", encoding="utf-8")
 
-            with patch("desktop_py.core.store.SETTINGS_FILE", settings_path), patch("desktop_py.core.store.ensure_runtime_dirs"):
+            with (
+                patch("desktop_py.core.store.SETTINGS_FILE", settings_path),
+                patch("desktop_py.core.store.ensure_runtime_dirs"),
+            ):
                 save_settings(load_settings())
                 settings = load_settings()
                 settings.auto_fetch_push_enabled = True
@@ -82,8 +97,9 @@ class StoreTestCase(unittest.TestCase):
         self.assertIn('"auto_fetch_push_enabled": true', content)
 
     def test_runtime_root_uses_executable_directory_when_frozen(self):
-        with patch("desktop_py.core.store.os.access", return_value=True), patch(
-            "desktop_py.core.store.sys", frozen=True, executable=r"C:\\portable\\小程序工具\\小程序工具.exe"
+        with (
+            patch("desktop_py.core.store.os.access", return_value=True),
+            patch("desktop_py.core.store.sys", frozen=True, executable=r"C:\\portable\\小程序工具\\小程序工具.exe"),
         ):
             root = runtime_root()
 
@@ -91,9 +107,13 @@ class StoreTestCase(unittest.TestCase):
 
     def test_runtime_root_falls_back_to_local_appdata_when_frozen_dir_not_writable(self):
         fake_env = {"LOCALAPPDATA": r"C:\Users\Tester\AppData\Local"}
-        with patch("desktop_py.core.store.os.access", return_value=False), patch(
-            "desktop_py.core.store.sys", frozen=True, executable=r"C:\\Program Files\\小程序工具\\小程序工具.exe"
-        ), patch.dict("desktop_py.core.store.os.environ", fake_env, clear=True):
+        with (
+            patch("desktop_py.core.store.os.access", return_value=False),
+            patch(
+                "desktop_py.core.store.sys", frozen=True, executable=r"C:\\Program Files\\小程序工具\\小程序工具.exe"
+            ),
+            patch.dict("desktop_py.core.store.os.environ", fake_env, clear=True),
+        ):
             root = runtime_root()
 
         self.assertEqual(root, Path(r"C:\Users\Tester\AppData\Local\小程序工具"))

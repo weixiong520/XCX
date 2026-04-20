@@ -41,8 +41,12 @@ class AccountPresenterTestCase(unittest.TestCase):
             AccountConfig(name="导入账号B", state_path="storage/shared.json", is_entry_account=False),
         ]
         results = [
-            FetchResult(account_name="导入账号A", ok=True, actual_account_name="账号甲", page_url="https://example.com/a"),
-            FetchResult(account_name="导入账号B", ok=True, actual_account_name="账号乙", page_url="https://example.com/b"),
+            FetchResult(
+                account_name="导入账号A", ok=True, actual_account_name="账号甲", page_url="https://example.com/a"
+            ),
+            FetchResult(
+                account_name="导入账号B", ok=True, actual_account_name="账号乙", page_url="https://example.com/b"
+            ),
         ]
 
         latest_actual_account_name = apply_batch_fetch_results(accounts, results)
@@ -84,10 +88,24 @@ class AccountPresenterTestCase(unittest.TestCase):
 
     def test_sort_accounts_for_display_keeps_entry_first_and_deadlines_nearest_first(self):
         accounts = [
-            AccountConfig(name="无截止账号", state_path="storage/shared.json", is_entry_account=False, last_status="抓取成功"),
-            AccountConfig(name="较远截止账号", state_path="storage/shared.json", is_entry_account=False, last_status="抓取成功", last_deadline="2026-04-25 12:00:00"),
+            AccountConfig(
+                name="无截止账号", state_path="storage/shared.json", is_entry_account=False, last_status="抓取成功"
+            ),
+            AccountConfig(
+                name="较远截止账号",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                last_status="抓取成功",
+                last_deadline="2026-04-25 12:00:00",
+            ),
             AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
-            AccountConfig(name="较近截止账号", state_path="storage/shared.json", is_entry_account=False, last_status="抓取成功", last_deadline="2026-04-19 09:00:00"),
+            AccountConfig(
+                name="较近截止账号",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                last_status="抓取成功",
+                last_deadline="2026-04-19 09:00:00",
+            ),
         ]
 
         sorted_accounts = sort_accounts_for_display(accounts)

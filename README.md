@@ -23,6 +23,15 @@ python -m pip install -r requirements.txt
 
 - 首次启动桌面程序时，如果缺少 Playwright 浏览器资源，程序会自动联网下载安装 Chromium
 - 打包后的安装版默认不再内置 Chromium，以减小包体
+- 当前抓取逻辑已按职责拆分为 `fetcher.py` 兼容入口层、`fetcher_switching.py`、`fetcher_session.py`、`fetcher_pipeline.py`、`fetcher_support.py` 与 `fetcher_page_strategy.py`
+
+## 浏览器运行时交付策略
+
+- **默认策略**：安装版不内置 Chromium，首次启动时在线下载到项目运行目录下的 `ms-playwright/`
+- **离线策略**：若目标环境无法联网，需要在交付前预置完整的 Playwright Chromium 运行时，确保程序首次启动时不再触发下载
+- **适用建议**：
+  - 办公网或普通开发环境：使用默认在线安装策略，减小安装包体积
+  - 内网、弱网或离线终端：使用离线预置策略，避免首次启动失败
 
 ## 安装包构建依赖
 
@@ -110,6 +119,24 @@ python desktop_py_cli.py notify
 - `output/desktop_py/<账号>/`：抓取产物
 - `ms-playwright/`：首次运行后下载的浏览器运行时
 
+## 存储边界
+
+当前版本的配置和抓取结果存储以本地 JSON 文件为主，这个方案只针对当前单机桌面工具场景。
+
+- **适用范围**：
+  - 单机使用
+  - 单进程写入
+  - 轻量配置与抓取结果留存
+- **当前不覆盖的能力**：
+  - 多人协同
+  - 并发写入协调
+  - 审计级历史追踪
+  - 集中调度与任务队列
+- **后续升级触发条件**：
+  - 多人共用同一套账号数据
+  - 需要集中查看历史抓取记录
+  - 需要更强的调度、审计或状态管理能力
+
 ## 抓取说明
 
 - 当前版本优先从 iframe 详情页中提取“处理截止时间”
@@ -126,11 +153,29 @@ python desktop_py_cli.py notify
 python -m unittest discover -s py_tests -v
 ```
 
+## 工程检查
+
+项目根目录已提供 `pyproject.toml`，当前统一使用 `ruff` 承担格式检查与静态检查。
+
+### 格式检查
+
+```powershell
+python -m ruff format --check .
+```
+
+### 静态检查
+
+```powershell
+python -m ruff check .
+```
+
 ## 推荐本地交付流程
 
 ```powershell
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-build.txt
+python -m ruff format --check .
+python -m ruff check .
 python -m unittest discover -s py_tests -v
 pwsh ./scripts/build_installer.ps1 -Clean
 ```
