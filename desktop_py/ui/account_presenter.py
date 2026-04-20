@@ -5,6 +5,10 @@ from datetime import datetime, timedelta
 from desktop_py.core.models import AccountConfig, FetchResult
 
 
+def is_no_deadline_note(note: str) -> bool:
+    return "未在详情页文本中提取到处理截止时间" in note
+
+
 def next_auto_fetch_push_interval_ms(now: datetime | None = None) -> int:
     current = now or datetime.now()
     target = current.replace(hour=9, minute=0, second=0, microsecond=0)
@@ -16,7 +20,7 @@ def next_auto_fetch_push_interval_ms(now: datetime | None = None) -> int:
 def apply_fetch_result(account: AccountConfig, result: FetchResult) -> str:
     account.last_fetch_at = result.fetched_at
     account.last_deadline = result.deadline_text
-    account.last_status = "抓取成功" if result.ok else "抓取失败"
+    account.last_status = "抓取成功" if result.ok or is_expected_empty_result_note(result.note) else "抓取失败"
     actual_note = f"当前实际账号：{result.actual_account_name}" if result.actual_account_name else ""
     account.last_note = "；".join(item for item in [result.note, actual_note] if item)
     account.feedback_url = result.page_url
@@ -32,7 +36,7 @@ def apply_batch_fetch_results(accounts: list[AccountConfig], results: list[Fetch
             continue
         account.last_fetch_at = result.fetched_at
         account.last_deadline = result.deadline_text
-        account.last_status = "抓取成功" if result.ok else "抓取失败"
+        account.last_status = "抓取成功" if result.ok or is_expected_empty_result_note(result.note) else "抓取失败"
         actual_note = f"当前实际账号：{result.actual_account_name}" if result.actual_account_name else ""
         account.last_note = "；".join(item for item in [result.note, actual_note] if item)
         if result.page_url:
@@ -46,14 +50,18 @@ def is_no_business_page_note(note: str) -> bool:
     return "页面未出现业务 iframe" in note
 
 
+def is_expected_empty_result_note(note: str) -> bool:
+    return is_no_business_page_note(note) or is_no_deadline_note(note) or "当前账号无待处理申请" in note
+
+
 def display_deadline_text(account: AccountConfig) -> str:
     if account.is_entry_account and not account.last_deadline:
         return "--"
+    if is_no_business_page_note(account.last_note):
+        return "无业面"
     if account.last_status == "抓取成功":
         return account.last_deadline or "无待处理"
     if account.last_status == "抓取失败":
-        if is_no_business_page_note(account.last_note):
-            return "无业面"
         return account.last_note or "抓取失败"
     return account.last_deadline
 

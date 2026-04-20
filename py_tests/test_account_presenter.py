@@ -68,6 +68,34 @@ class AccountPresenterTestCase(unittest.TestCase):
         self.assertEqual(deadline_tooltip_text(account), account.last_note)
         self.assertEqual(display_result_text(account), "失败")
 
+    def test_apply_fetch_result_treats_no_deadline_note_as_success(self):
+        account = AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False)
+        result = FetchResult(
+            account_name="导入账号A",
+            ok=False,
+            note="未在详情页文本中提取到处理截止时间。",
+        )
+
+        apply_fetch_result(account, result)
+
+        self.assertEqual(account.last_status, "抓取成功")
+        self.assertEqual(display_deadline_text(account), "无待处理")
+        self.assertEqual(display_result_text(account), "完成")
+
+    def test_apply_fetch_result_treats_no_business_page_note_as_success(self):
+        account = AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False)
+        result = FetchResult(
+            account_name="导入账号A",
+            ok=False,
+            note="页面未出现业务 iframe，可能是链接失效、无权限或登录态失效。",
+        )
+
+        apply_fetch_result(account, result)
+
+        self.assertEqual(account.last_status, "抓取成功")
+        self.assertEqual(display_deadline_text(account), "无业面")
+        self.assertEqual(display_result_text(account), "完成")
+
     def test_next_auto_fetch_push_interval_ms_matches_existing_schedule(self):
         self.assertEqual(
             next_auto_fetch_push_interval_ms(datetime(2026, 4, 18, 8, 30, 0)),

@@ -239,7 +239,7 @@ class UiSmokeTestCase(unittest.TestCase):
                 name="导入账号",
                 state_path="storage/shared.json",
                 is_entry_account=False,
-                last_status="抓取失败",
+                last_status="抓取成功",
                 last_note=reason,
             ),
         ]
@@ -247,8 +247,28 @@ class UiSmokeTestCase(unittest.TestCase):
         window.refresh_table()
 
         self.assertEqual(window.table.item(0, 1).text(), "无业面")
-        self.assertEqual(window.table.item(0, 3).text(), "失败")
-        self.assertEqual(window.table.item(0, 1).toolTip(), reason)
+        self.assertEqual(window.table.item(0, 2).text(), "抓取成功")
+        self.assertEqual(window.table.item(0, 3).text(), "完成")
+        self.assertEqual(window.table.item(0, 1).toolTip(), "无业面")
+
+    def test_no_deadline_note_shows_no_pending_and_completed(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(
+                name="导入账号",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                last_status="抓取成功",
+                last_note="未在详情页文本中提取到处理截止时间。",
+            ),
+        ]
+
+        window.refresh_table()
+
+        self.assertEqual(window.table.item(0, 1).text(), "无待处理")
+        self.assertEqual(window.table.item(0, 2).text(), "抓取成功")
+        self.assertEqual(window.table.item(0, 3).text(), "完成")
 
     def test_mark_validation_uses_short_status_text(self):
         window = MainWindow()
