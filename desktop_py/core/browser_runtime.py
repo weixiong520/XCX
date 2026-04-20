@@ -12,7 +12,6 @@ from desktop_py.core.store import runtime_root
 
 
 APP_NAME = "小程序工具"
-DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST = "https://npmmirror.com/mirrors/playwright"
 DEFAULT_PLAYWRIGHT_DOWNLOAD_TIMEOUT_MS = "120000"
 
 
@@ -64,8 +63,6 @@ def playwright_install_command() -> list[str]:
 def playwright_install_environment(target: Path) -> dict[str, str]:
     env = os.environ.copy()
     env["PLAYWRIGHT_BROWSERS_PATH"] = str(target)
-    if not env.get("PLAYWRIGHT_DOWNLOAD_HOST") and not env.get("PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST"):
-        env["PLAYWRIGHT_DOWNLOAD_HOST"] = DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST
     env.setdefault("PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT", DEFAULT_PLAYWRIGHT_DOWNLOAD_TIMEOUT_MS)
     return env
 
@@ -94,27 +91,8 @@ def _run_playwright_install(env: dict[str, str], logger: callable | None = None)
     return process.wait() == 0, "\n".join(lines[-40:])
 
 
-def _should_retry_with_official_host(output: str, env: dict[str, str]) -> bool:
-    using_default_mirror = env.get("PLAYWRIGHT_DOWNLOAD_HOST") == DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST
-    if not using_default_mirror:
-        return False
-    lowered = output.lower()
-    return "server returned code 404" in lowered or "nosuchkey" in lowered
-
-
 def install_playwright_browsers(logger: callable | None = None) -> tuple[bool, str]:
     target = configure_playwright_environment()
     target.mkdir(parents=True, exist_ok=True)
     env = playwright_install_environment(target)
-    ok, output = _run_playwright_install(env, logger)
-    if ok:
-        return ok, output
-
-    if _should_retry_with_official_host(output, env):
-        fallback_env = env.copy()
-        fallback_env.pop("PLAYWRIGHT_DOWNLOAD_HOST", None)
-        if logger is not None:
-            logger("国内镜像缺少当前浏览器资源，正在切换官方源重试。")
-        return _run_playwright_install(fallback_env, logger)
-
-    return ok, output
+    return _run_playwright_install(env, logger)

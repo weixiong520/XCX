@@ -4,9 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from desktop_py.core.browser_runtime import (
-    DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST,
     DEFAULT_PLAYWRIGHT_DOWNLOAD_TIMEOUT_MS,
-    _should_retry_with_official_host,
     configure_playwright_environment,
     install_playwright_browsers,
     playwright_install_environment,
@@ -61,12 +59,13 @@ class BrowserRuntimeTestCase(unittest.TestCase):
         self.assertEqual(command[1], r"C:\app\_internal\playwright\driver\package\cli.js")
         self.assertEqual(command[2:], ["install", "chromium"])
 
-    def test_playwright_install_environment_uses_default_domestic_mirror(self):
+    def test_playwright_install_environment_uses_official_source_by_default(self):
         with patch.dict("desktop_py.core.browser_runtime.os.environ", {}, clear=True):
             env = playwright_install_environment(Path(r"C:\portable\小程序工具\ms-playwright"))
 
         self.assertEqual(env["PLAYWRIGHT_BROWSERS_PATH"], r"C:\portable\小程序工具\ms-playwright")
-        self.assertEqual(env["PLAYWRIGHT_DOWNLOAD_HOST"], DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST)
+        self.assertNotIn("PLAYWRIGHT_DOWNLOAD_HOST", env)
+        self.assertNotIn("PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST", env)
         self.assertEqual(env["PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT"], DEFAULT_PLAYWRIGHT_DOWNLOAD_TIMEOUT_MS)
 
     def test_playwright_install_environment_keeps_custom_mirror(self):
@@ -94,21 +93,11 @@ class BrowserRuntimeTestCase(unittest.TestCase):
         self.assertNotIn("PLAYWRIGHT_DOWNLOAD_HOST", env)
         self.assertEqual(env["PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST"], "https://example.com/chromium")
 
-    def test_should_retry_with_official_host_for_default_mirror_404(self):
-        env = {"PLAYWRIGHT_DOWNLOAD_HOST": DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST}
-        self.assertTrue(_should_retry_with_official_host("Error: server returned code 404 NoSuchKey", env))
-
-    def test_should_not_retry_with_official_host_for_custom_mirror(self):
-        env = {"PLAYWRIGHT_DOWNLOAD_HOST": "https://example.com/playwright"}
-        self.assertFalse(_should_retry_with_official_host("Error: server returned code 404 NoSuchKey", env))
-
-    def test_install_playwright_browsers_retries_official_host_after_mirror_404(self):
+    def test_install_playwright_browsers_uses_single_official_install_attempt(self):
         call_envs: list[dict[str, str]] = []
 
         def fake_run(env, logger=None):
             call_envs.append(dict(env))
-            if len(call_envs) == 1:
-                return False, "Error: server returned code 404\n<Code>NoSuchKey</Code>"
             return True, "ok"
 
         logs: list[str] = []
@@ -119,9 +108,9 @@ class BrowserRuntimeTestCase(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertEqual(output, "ok")
-        self.assertEqual(call_envs[0]["PLAYWRIGHT_DOWNLOAD_HOST"], DEFAULT_PLAYWRIGHT_DOWNLOAD_HOST)
-        self.assertNotIn("PLAYWRIGHT_DOWNLOAD_HOST", call_envs[1])
-        self.assertIn("国内镜像缺少当前浏览器资源，正在切换官方源重试。", logs)
+        self.assertEqual(len(call_envs), 1)
+        self.assertNotIn("PLAYWRIGHT_DOWNLOAD_HOST", call_envs[0])
+        self.assertEqual(logs, [])
 
 
 if __name__ == "__main__":
