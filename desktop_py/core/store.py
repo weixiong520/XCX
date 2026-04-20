@@ -10,6 +10,7 @@ from desktop_py.core.models import AccountConfig, AppSettings, FetchResult
 
 
 APP_NAME = "小程序工具"
+SHARED_BROWSER_PROFILE_DIR_NAME = "browser_profile"
 BROWSER_PROFILE_LOCK_FILES = (
     "SingletonLock",
     "SingletonCookie",
@@ -60,6 +61,20 @@ def validate_shared_browser_profile_dir(profile_dir: str) -> str:
     if _has_browser_lock_markers(resolved):
         raise ValueError("共享浏览器资料目录当前疑似正被浏览器占用，请先关闭相关浏览器后再使用。")
     return str(resolved)
+
+
+def prepare_shared_browser_profile_dir(parent_dir: str) -> str:
+    value = parent_dir.strip()
+    if not value:
+        return ""
+
+    parent = Path(value).expanduser()
+    if parent.exists() and not parent.is_dir():
+        raise ValueError("共享浏览器资料父目录必须是文件夹。")
+
+    target = parent if parent.name == SHARED_BROWSER_PROFILE_DIR_NAME else parent / SHARED_BROWSER_PROFILE_DIR_NAME
+    target.mkdir(parents=True, exist_ok=True)
+    return validate_shared_browser_profile_dir(str(target))
 
 
 def _looks_like_default_browser_profile_dir(path: Path) -> bool:

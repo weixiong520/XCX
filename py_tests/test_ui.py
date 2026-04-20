@@ -1,6 +1,8 @@
 import os
 import unittest
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -10,6 +12,7 @@ from PySide6.QtGui import QCloseEvent, QKeyEvent
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from desktop_py.core.models import AccountConfig, AppSettings, FetchResult
+from desktop_py.core.store import SHARED_BROWSER_PROFILE_DIR_NAME
 from desktop_py.ui.account_dialog import AccountDialog
 from desktop_py.ui.main_window import KEEP_ALIVE_INTERVAL_MS, MainWindow
 
@@ -570,6 +573,30 @@ class UiSmokeTestCase(unittest.TestCase):
 
         self.assertEqual(window.settings.login_wait_seconds, 45)
         self.assertEqual(mock_save_settings.call_args.args[0].login_wait_seconds, 45)
+
+    def test_choose_profile_dir_creates_dedicated_child_dir(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+
+        with TemporaryDirectory() as temp_dir, patch(
+            "desktop_py.ui.main_window.QFileDialog.getExistingDirectory",
+            return_value=temp_dir,
+        ):
+            window.choose_profile_dir()
+
+            expected = Path(temp_dir) / SHARED_BROWSER_PROFILE_DIR_NAME
+            self.assertTrue(expected.is_dir())
+            self.assertEqual(window.profile_dir_edit.text(), str(expected.resolve()))
+
+    def test_choose_profile_dir_keeps_current_text_when_cancelled(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.profile_dir_edit.setText("原目录")
+
+        with patch("desktop_py.ui.main_window.QFileDialog.getExistingDirectory", return_value=""):
+            window.choose_profile_dir()
+
+        self.assertEqual(window.profile_dir_edit.text(), "原目录")
 
     def test_milliseconds_until_next_auto_fetch_push_before_nine(self):
         window = MainWindow()

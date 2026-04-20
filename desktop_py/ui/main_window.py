@@ -47,6 +47,7 @@ from desktop_py.core.store import (
     ensure_runtime_dirs,
     load_accounts,
     load_settings,
+    prepare_shared_browser_profile_dir,
     save_accounts,
     save_settings,
     validate_shared_browser_profile_dir,
@@ -903,7 +904,12 @@ class MainWindow(QMainWindow):
     def choose_profile_dir(self) -> None:
         target = QFileDialog.getExistingDirectory(self, "选择共享浏览器资料目录", self.profile_dir_edit.text().strip())
         if target:
-            self.profile_dir_edit.setText(target)
+            try:
+                profile_dir = prepare_shared_browser_profile_dir(target)
+            except (OSError, ValueError) as exc:
+                self._show_warning("目录错误", str(exc))
+                return
+            self.profile_dir_edit.setText(profile_dir)
 
     def add_account(self) -> None:
         dialog = AccountDialog(parent=self)

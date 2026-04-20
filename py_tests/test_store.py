@@ -5,9 +5,11 @@ from unittest.mock import patch
 
 from desktop_py.core.models import AccountConfig
 from desktop_py.core.store import (
+    SHARED_BROWSER_PROFILE_DIR_NAME,
     account_state_path,
     load_accounts,
     load_settings,
+    prepare_shared_browser_profile_dir,
     runtime_root,
     save_settings,
     validate_shared_browser_profile_dir,
@@ -125,6 +127,32 @@ class StoreTestCase(unittest.TestCase):
             validated = validate_shared_browser_profile_dir(str(profile_root))
 
         self.assertEqual(validated, str(profile_root.resolve()))
+
+    def test_prepare_shared_browser_profile_dir_creates_dedicated_child_dir(self):
+        with TemporaryDirectory() as temp_dir:
+            parent = Path(temp_dir)
+            prepared = prepare_shared_browser_profile_dir(str(parent))
+            expected = parent / SHARED_BROWSER_PROFILE_DIR_NAME
+
+            self.assertTrue(expected.is_dir())
+            self.assertEqual(prepared, str(expected.resolve()))
+
+    def test_prepare_shared_browser_profile_dir_does_not_nest_dedicated_dir(self):
+        with TemporaryDirectory() as temp_dir:
+            dedicated = Path(temp_dir) / SHARED_BROWSER_PROFILE_DIR_NAME
+            dedicated.mkdir()
+
+            prepared = prepare_shared_browser_profile_dir(str(dedicated))
+
+        self.assertEqual(prepared, str(dedicated.resolve()))
+
+    def test_prepare_shared_browser_profile_dir_rejects_file_parent(self):
+        with TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "not-dir.txt"
+            file_path.write_text("", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "父目录必须是文件夹"):
+                prepare_shared_browser_profile_dir(str(file_path))
 
 
 if __name__ == "__main__":
