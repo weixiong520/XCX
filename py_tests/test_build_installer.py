@@ -26,8 +26,10 @@ class BuildInstallerScriptTestCase(unittest.TestCase):
         content = SCRIPT_PATH.read_text(encoding="utf-8")
 
         self.assertIn("[switch]$IncludeOfflineChromium", content)
-        self.assertIn('Resolve-OfflineRuntimeSource -ProjectRoot $projectRoot', content)
-        self.assertIn('Copy-Item -LiteralPath $offlineRuntimeSource -Destination $offlineRuntimeTarget -Recurse -Force', content)
+        self.assertIn("Resolve-OfflineRuntimeSource -ProjectRoot $projectRoot", content)
+        self.assertIn(
+            "Copy-Item -LiteralPath $offlineRuntimeSource -Destination $offlineRuntimeTarget -Recurse -Force", content
+        )
 
 
 if __name__ == "__main__":
