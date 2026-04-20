@@ -14,6 +14,10 @@ from playwright.sync_api import sync_playwright
 from desktop_py.core.fetcher_page_strategy import (
     build_detail_result,
     build_empty_refund_result,
+    captures_indicate_non_empty_refunds,
+    confirm_detail_deadline,
+    confirm_empty_refund_list,
+    has_pending_refund_signal,
     is_empty_refund_list,
     open_feedback_page,
     register_response_capture,
@@ -44,6 +48,7 @@ from desktop_py.core.fetcher_support import (
     _capture_response_payload,
     _close_context_and_browser,
     _close_page,
+    _fallback_from_responses,
     _log,
     build_feedback_url,
     business_iframe_selector,
@@ -69,10 +74,12 @@ from desktop_py.core.fetcher_switching import (
     should_switch_for_account_impl,
     switch_dialog_ready_impl,
     switch_to_account_impl,
+    wait_for_account_switch_stable_impl,
     wait_for_locator_items_impl,
     wait_for_switch_account_items_impl,
 )
 from desktop_py.core.models import AccountConfig, FetchResult
+from desktop_py.core.parser import extract_labeled_datetime
 from desktop_py.core.store import account_output_dir, validate_shared_browser_profile_dir
 
 # 稳定公开接口只包含主流程入口；
@@ -204,6 +211,16 @@ def switch_to_account(page: Page, account_name: str, home_url: str = "", logger:
         open_switch_account_dialog_fn=open_switch_account_dialog,
         wait_for_switch_account_items_fn=wait_for_switch_account_items,
         wait_for_current_account_name_fn=wait_for_current_account_name,
+        wait_for_account_switch_stable_fn=lambda target_page, expected_account_name, home_url="": (
+            wait_for_account_switch_stable_impl(
+                target_page,
+                expected_account_name,
+                home_url,
+                extract_current_account_name_fn=extract_current_account_name,
+                wait_for_url_contains_fn=wait_for_url_contains,
+                wait_or_cancel_fn=wait_or_cancel,
+            )
+        ),
         log_fn=_log,
     )
 
@@ -310,8 +327,22 @@ def _fetch_account_in_page(
         business_iframe_selector_fn=business_iframe_selector,
         safe_page_content_fn=safe_page_content,
         is_empty_refund_list_fn=is_empty_refund_list,
+        confirm_empty_refund_list_fn=lambda **kwargs: confirm_empty_refund_list(
+            **kwargs,
+            has_pending_refund_signal_fn=has_pending_refund_signal,
+            captures_indicate_non_empty_refunds_fn=captures_indicate_non_empty_refunds,
+            wait_or_cancel_fn=wait_or_cancel,
+        ),
         build_empty_refund_result_fn=build_empty_refund_result,
-        build_detail_result_fn=build_detail_result,
+        build_detail_result_fn=lambda **kwargs: build_detail_result(
+            **kwargs,
+            confirm_detail_deadline_fn=lambda **detail_kwargs: confirm_detail_deadline(
+                **detail_kwargs,
+                extract_labeled_datetime_fn=extract_labeled_datetime,
+                fallback_from_responses_fn=_fallback_from_responses,
+                wait_or_cancel_fn=wait_or_cancel,
+            ),
+        ),
     )
 
 

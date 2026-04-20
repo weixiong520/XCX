@@ -75,6 +75,7 @@ def fetch_account_in_page_impl(
     business_iframe_selector_fn,
     safe_page_content_fn,
     is_empty_refund_list_fn,
+    confirm_empty_refund_list_fn,
     build_empty_refund_result_fn,
     build_detail_result_fn,
 ) -> FetchResult:
@@ -121,20 +122,30 @@ def fetch_account_in_page_impl(
         )
         list_text = frame_locator.locator("body").text_content(timeout=15000) or ""
 
-        if is_empty_refund_list_fn(list_text):
+        empty_confirmed, confirmed_list_text = confirm_empty_refund_list_fn(
+            page=page,
+            frame_locator=frame_locator,
+            initial_text=list_text,
+            captures=captures,
+            is_empty_refund_list_fn=is_empty_refund_list_fn,
+            is_cancelled=is_cancelled,
+        )
+
+        if empty_confirmed:
             result = build_empty_refund_result_fn(
                 page=page,
                 context=context,
                 account=account,
                 output_dir=output_dir,
                 frame_locator=frame_locator,
-                list_text=list_text,
+                list_text=confirmed_list_text,
                 captures=captures,
                 feedback_url=feedback_url,
                 profile_dir=profile_dir,
                 logger=logger,
                 safe_page_content_fn=safe_page_content_fn,
                 extract_current_account_name_fn=extract_current_account_name_fn,
+                is_cancelled=is_cancelled,
             )
         else:
             result = build_detail_result_fn(

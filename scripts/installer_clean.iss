@@ -40,8 +40,16 @@ Name: "chinesesimp"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："
 
+[Dirs]
+Name: "{app}\data"
+Name: "{app}\storage"
+Name: "{app}\browser_profile"
+Name: "{app}\output"
+
 [Files]
-Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "data\*,storage\*,browser_profile\*,output\*"
+Source: "{#MySourceDir}\data\accounts.json"; DestDir: "{app}\data"; Flags: ignoreversion onlyifdoesntexist
+Source: "{#MySourceDir}\data\settings.json"; DestDir: "{app}\data"; Flags: ignoreversion onlyifdoesntexist
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

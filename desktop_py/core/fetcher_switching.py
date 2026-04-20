@@ -170,6 +170,7 @@ def switch_to_account_impl(
     open_switch_account_dialog_fn,
     wait_for_switch_account_items_fn,
     wait_for_current_account_name_fn,
+    wait_for_account_switch_stable_fn,
     log_fn,
 ) -> None:
     prepare_switch_account_page_fn(page, home_url, logger)
@@ -204,7 +205,40 @@ def switch_to_account_impl(
     actual_name = wait_for_current_account_name_fn(page, account_name, timeout_ms=5000)
     if actual_name and actual_name != account_name:
         raise FetchError(f"已点击切换账号，但当前实际账号为“{actual_name}”，不是目标账号“{account_name}”。")
+    wait_for_account_switch_stable_fn(page, account_name, home_url=home_url)
     log_fn(logger, f"已切换到账号：{account_name}")
+
+
+def wait_for_account_switch_stable_impl(
+    page: Page,
+    expected_account_name: str,
+    home_url: str = "",
+    *,
+    extract_current_account_name_fn,
+    wait_for_url_contains_fn,
+    wait_or_cancel_fn,
+    is_cancelled: callable | None = None,
+    stable_rounds: int = 2,
+    interval_ms: int = 600,
+) -> str:
+    wait_for_url_contains_fn(page, ("token=", "/wxamp/index/index", "pluginRedirect/gameFeedback"), timeout_ms=5000)
+    latest_name = ""
+    matched_rounds = 0
+    for _ in range(6):
+        latest_name = extract_current_account_name_fn(page).strip()
+        if latest_name == expected_account_name:
+            matched_rounds += 1
+            if matched_rounds >= stable_rounds:
+                return latest_name
+        else:
+            matched_rounds = 0
+        wait_or_cancel_fn(page, interval_ms, is_cancelled)
+
+    if latest_name and latest_name != expected_account_name:
+        raise FetchError(
+            f"切换账号后页面稳定校验失败，当前实际账号为“{latest_name}”，不是目标账号“{expected_account_name}”。"
+        )
+    return latest_name
 
 
 def list_switchable_accounts_impl(
