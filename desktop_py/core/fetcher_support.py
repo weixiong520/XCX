@@ -26,7 +26,6 @@ BUSINESS_IFRAME_SELECTORS = (
     "#js_iframe",
     "iframe[src*='gameFeedback']",
     "iframe[src*='refund']",
-    "iframe",
 )
 
 

@@ -64,7 +64,7 @@ class AccountPresenterTestCase(unittest.TestCase):
             last_note="页面未出现业务 iframe，可能是链接失效、无权限或登录态失效。",
         )
 
-        self.assertEqual(display_deadline_text(account), "无业面")
+        self.assertEqual(display_deadline_text(account), "无页面")
         self.assertEqual(deadline_tooltip_text(account), account.last_note)
         self.assertEqual(display_result_text(account), "失败")
 
@@ -93,7 +93,7 @@ class AccountPresenterTestCase(unittest.TestCase):
         apply_fetch_result(account, result)
 
         self.assertEqual(account.last_status, "抓取成功")
-        self.assertEqual(display_deadline_text(account), "无业面")
+        self.assertEqual(display_deadline_text(account), "无页面")
         self.assertEqual(display_result_text(account), "完成")
 
     def test_next_auto_fetch_push_interval_ms_matches_existing_schedule(self):

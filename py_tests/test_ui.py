@@ -246,10 +246,10 @@ class UiSmokeTestCase(unittest.TestCase):
 
         window.refresh_table()
 
-        self.assertEqual(window.table.item(0, 1).text(), "无业面")
+        self.assertEqual(window.table.item(0, 1).text(), "无页面")
         self.assertEqual(window.table.item(0, 2).text(), "抓取成功")
         self.assertEqual(window.table.item(0, 3).text(), "完成")
-        self.assertEqual(window.table.item(0, 1).toolTip(), "无业面")
+        self.assertEqual(window.table.item(0, 1).toolTip(), "无页面")
 
     def test_no_deadline_note_shows_no_pending_and_completed(self):
         window = MainWindow()

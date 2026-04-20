@@ -58,7 +58,7 @@ def display_deadline_text(account: AccountConfig) -> str:
     if account.is_entry_account and not account.last_deadline:
         return "--"
     if is_no_business_page_note(account.last_note):
-        return "无业面"
+        return "无页面"
     if account.last_status == "抓取成功":
         return account.last_deadline or "无待处理"
     if account.last_status == "抓取失败":

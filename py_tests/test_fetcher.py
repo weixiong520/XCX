@@ -502,6 +502,18 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertEqual(business_iframe_selector(page), "iframe[src*='gameFeedback']")
 
+    def test_business_iframe_selector_ignores_generic_non_business_iframe(self):
+        page = FakePage(
+            locator_map={
+                ("#js_iframe", None): FakeLocator(count=0),
+                ("iframe[src*='gameFeedback']", None): FakeLocator(count=0),
+                ("iframe[src*='refund']", None): FakeLocator(count=0),
+                ("iframe", None): FakeLocator(count=1),
+            }
+        )
+
+        self.assertEqual(business_iframe_selector(page), "")
+
     def test_wait_for_iframe_ready_accepts_fallback_iframe_with_refund_text(self):
         frame = FakeFrame(text="退款申请 处理截止时间：2026-04-20 18:00")
         page = FakePage(
