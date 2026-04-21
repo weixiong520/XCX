@@ -4,6 +4,7 @@ import argparse
 import json
 
 from desktop_py.core.fetcher import fetch_account, save_login_state, save_login_state_with_profile
+from desktop_py.core.models import FetchResult
 from desktop_py.core.notifier import build_summary, send_feishu_text
 from desktop_py.core.store import load_accounts, load_settings
 
@@ -42,14 +43,22 @@ def main() -> int:
         return 0
 
     if args.command == "notify":
-        summary = build_summary(
-            [
-                fetch_account(account, 0, settings.headless_fetch, print)
-                for account in enabled_imported_accounts(accounts)
-            ]
-        )
+        results: list[FetchResult] = []
+        failed_accounts: list[str] = []
+        for account in enabled_imported_accounts(accounts):
+            try:
+                results.append(fetch_account(account, 0, settings.headless_fetch, print))
+            except Exception as exc:
+                failed_accounts.append(f"{account.name}：{exc}")
+                results.append(FetchResult(account_name=account.name, ok=False, note=str(exc)))
+
+        summary = build_summary(results)
         send_feishu_text(settings.feishu_webhook, summary)
         print("飞书消息已发送")
+        if failed_accounts:
+            print("以下账号抓取失败，但已完成其余账号汇总：")
+            for item in failed_accounts:
+                print(f"- {item}")
         return 0
 
     return 0

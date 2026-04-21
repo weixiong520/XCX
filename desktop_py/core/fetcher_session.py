@@ -7,6 +7,12 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from desktop_py.core.fetcher_support import FetchError, ensure_account_session_available, normalize_profile_dir
 from desktop_py.core.models import AccountConfig
 
+BACKEND_SESSION_URL_KEYWORDS = ("token=", "/wxamp/index/index", "pluginRedirect/gameFeedback")
+
+
+def _has_backend_session_url(page) -> bool:
+    return any(keyword in str(getattr(page, "url", "") or "") for keyword in BACKEND_SESSION_URL_KEYWORDS)
+
 
 def _wait_for_login_success(
     page,
@@ -21,7 +27,7 @@ def _wait_for_login_success(
     deadline = datetime_cls.now().timestamp() + wait_seconds
     while datetime_cls.now().timestamp() < deadline:
         wait_or_cancel_fn(page, 2000, is_cancelled)
-        if "token=" in page.url or "/wxamp/index/index" in page.url:
+        if _has_backend_session_url(page):
             context.storage_state(path=str(state_path), indexed_db=True)
             return
     raise FetchError("未在限定时间内检测到登录成功，已保留原登录态文件。")
@@ -160,8 +166,10 @@ def validate_account_state_impl(
         page = context.new_page()
         try:
             page.goto(account.home_url, wait_until="domcontentloaded", timeout=60000)
-            wait_for_url_contains_fn(page, ("token=", "/wxamp/index/index"), timeout_ms=4000)
-            valid = "token=" in page.url or "/wxamp/index/index" in page.url
+            valid = bool(
+                wait_for_url_contains_fn(page, BACKEND_SESSION_URL_KEYWORDS, timeout_ms=10000)
+                or _has_backend_session_url(page)
+            )
         except PlaywrightTimeoutError:
             valid = False
         finally:
@@ -212,8 +220,10 @@ def renew_account_state_impl(
         renewed = False
         try:
             page.goto(account.home_url, wait_until="domcontentloaded", timeout=60000)
-            wait_for_url_contains_fn(page, ("token=", "/wxamp/index/index"), timeout_ms=4000)
-            renewed = "token=" in page.url or "/wxamp/index/index" in page.url
+            renewed = bool(
+                wait_for_url_contains_fn(page, BACKEND_SESSION_URL_KEYWORDS, timeout_ms=10000)
+                or _has_backend_session_url(page)
+            )
         except PlaywrightTimeoutError:
             renewed = False
         finally:

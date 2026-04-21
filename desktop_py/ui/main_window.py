@@ -578,6 +578,7 @@ class MainWindow(QMainWindow):
             send_feishu_text_fn=lambda target_webhook, content: send_feishu_text(target_webhook, content),
             fetch_result_cls=FetchResult,
             actual_account_prefix=ACTUAL_ACCOUNT_PREFIX,
+            save_accounts_fn=save_accounts,
         )
 
     def _actual_account_name_from_note(self, note: str) -> str:

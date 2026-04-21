@@ -610,6 +610,7 @@ def send_summary_with_webhook(
     send_feishu_text_fn,
     fetch_result_cls,
     actual_account_prefix: str,
+    save_accounts_fn,
 ) -> None:
     if append_batch_log:
         window.append_log("批量抓取已完成。")
@@ -629,8 +630,24 @@ def send_summary_with_webhook(
     ]
     window._run_thread(
         lambda _log: send_feishu_text_fn(webhook, build_summary_fn(results)),
-        on_success=lambda _: window.append_log("飞书汇总已发送。"),
+        on_success=lambda _: clear_pushed_fetch_state(window, save_accounts_fn=save_accounts_fn),
     )
+
+
+def clear_pushed_fetch_state(window, *, save_accounts_fn) -> None:
+    for account in window.accounts:
+        if account.is_entry_account or not account.enabled:
+            continue
+        account.last_deadline = ""
+        account.last_status = ""
+        account.last_note = ""
+    window.refresh_table()
+    try:
+        save_accounts_fn(window.accounts)
+    except Exception as exc:
+        window.append_log(f"清理推送后状态失败：{exc}")
+    window.append_log("飞书汇总已发送。")
+    window.append_log("已清理推送后的抓取状态。")
 
 
 def actual_account_name_from_note(note: str, *, actual_account_prefix: str) -> str:

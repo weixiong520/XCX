@@ -574,6 +574,78 @@ class UiSmokeTestCase(unittest.TestCase):
             job(lambda _message: None)
         self.assertEqual(captured_results[0].actual_account_name, "实际账号A")
 
+    def test_send_summary_clears_pushed_fetch_state_after_success(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(
+                name="主账号",
+                state_path="storage/shared.json",
+                is_entry_account=True,
+                enabled=True,
+                last_status="登录有效",
+                last_deadline="",
+                last_note="可直接抓取",
+            ),
+            AccountConfig(
+                name="导入账号A",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                enabled=True,
+                last_status="抓取成功",
+                last_deadline="2026-04-20 11:42:31",
+                last_note="已完成详情页抓取。",
+            ),
+            AccountConfig(
+                name="导入账号B",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                enabled=False,
+                last_status="抓取成功",
+                last_deadline="2026-04-21 11:42:31",
+                last_note="已完成详情页抓取。",
+            ),
+        ]
+
+        with (
+            patch.object(window, "_run_thread") as mock_run_thread,
+            patch("desktop_py.ui.main_window.save_accounts") as mock_save_accounts,
+        ):
+            window._send_summary_with_webhook("https://example.com/hook")
+            on_success = mock_run_thread.call_args.kwargs["on_success"]
+            on_success(None)
+
+        accounts_by_name = {account.name: account for account in window.accounts}
+        self.assertEqual(accounts_by_name["主账号"].last_status, "登录有效")
+        self.assertEqual(accounts_by_name["导入账号A"].last_deadline, "")
+        self.assertEqual(accounts_by_name["导入账号A"].last_status, "")
+        self.assertEqual(accounts_by_name["导入账号A"].last_note, "")
+        self.assertEqual(accounts_by_name["导入账号B"].last_deadline, "2026-04-21 11:42:31")
+        mock_save_accounts.assert_called_once_with(window.accounts)
+        self.assertIn("已清理推送后的抓取状态", window.log_edit.toPlainText())
+
+    def test_send_summary_does_not_clear_before_send_success(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(
+                name="导入账号A",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                enabled=True,
+                last_status="抓取成功",
+                last_deadline="2026-04-20 11:42:31",
+                last_note="已完成详情页抓取。",
+            ),
+        ]
+
+        with patch.object(window, "_run_thread"):
+            window._send_summary_with_webhook("https://example.com/hook")
+
+        self.assertEqual(window.accounts[0].last_deadline, "2026-04-20 11:42:31")
+        self.assertEqual(window.accounts[0].last_status, "抓取成功")
+        self.assertEqual(window.accounts[0].last_note, "已完成详情页抓取。")
+
     def test_auto_fetch_and_send_uses_fetch_job_and_progress_callback(self):
         window = MainWindow()
         self.addCleanup(window.close)

@@ -1708,6 +1708,84 @@ class FetcherTestCase(unittest.TestCase):
         self.assertNotIn("storage:storage\\shared.json:True", calls)
         self.assertEqual(calls[-2:], ["page", "context"])
 
+    def test_validate_account_state_trusts_transient_backend_url_match(self):
+        calls: list[str] = []
+
+        class FakePageForValidation:
+            url = "https://mp.weixin.qq.com/"
+
+            def goto(self, _url, wait_until=None, timeout=None):
+                calls.append("goto")
+
+            def close(self):
+                calls.append("page")
+
+        class FakeContextForValidation:
+            def __init__(self):
+                self.page = FakePageForValidation()
+
+            def new_page(self):
+                return self.page
+
+            def close(self):
+                calls.append("context")
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                return_value=(None, FakeContextForValidation()),
+            ),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=True) as mock_wait,
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            valid = validate_account_state(AccountConfig(name="主账号", state_path="storage/shared.json"))
+
+        self.assertTrue(valid)
+        mock_wait.assert_called_once_with(
+            mock_wait.call_args.args[0],
+            ("token=", "/wxamp/index/index", "pluginRedirect/gameFeedback"),
+            timeout_ms=10000,
+        )
+        self.assertEqual(calls[-2:], ["page", "context"])
+
+    def test_validate_account_state_accepts_feedback_page_url(self):
+        class FakePageForValidation:
+            url = "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&token=1"
+
+            def goto(self, _url, wait_until=None, timeout=None):
+                return None
+
+            def close(self):
+                return None
+
+        class FakeContextForValidation:
+            def __init__(self):
+                self.page = FakePageForValidation()
+
+            def new_page(self):
+                return self.page
+
+            def close(self):
+                return None
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                return_value=(None, FakeContextForValidation()),
+            ),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=False),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            valid = validate_account_state(AccountConfig(name="主账号", state_path="storage/shared.json"))
+
+        self.assertTrue(valid)
+
     def test_renew_account_state_persists_shared_profile_state(self):
         calls: list[str] = []
 
