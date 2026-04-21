@@ -89,7 +89,7 @@ class TaskRunnerTestCase(unittest.TestCase):
         self.assertEqual(threads, [])
         self.assertEqual(updates, ["update"])
 
-    def test_cancel_all_clears_registered_worker(self):
+    def test_cancel_all_keeps_running_worker_until_idle(self):
         updates: list[str] = []
         threads = []
         runner = WindowTaskRunner(
@@ -108,8 +108,14 @@ class TaskRunnerTestCase(unittest.TestCase):
 
         runner.cancel_all()
 
-        self.assertEqual(threads, [])
+        self.assertEqual(threads, [runner._worker])
+        self.assertTrue(runner._worker.cancelled)
         self.assertGreaterEqual(len(updates), 2)
+
+        runner._worker.idle.callbacks[0]()
+
+        self.assertEqual(threads, [])
+        self.assertGreaterEqual(len(updates), 3)
 
     def test_cancelled_task_logs_cancelled_without_failure(self):
         logs: list[str] = []

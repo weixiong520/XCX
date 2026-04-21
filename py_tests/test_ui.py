@@ -605,6 +605,15 @@ class UiSmokeTestCase(unittest.TestCase):
                 last_deadline="2026-04-21 11:42:31",
                 last_note="已完成详情页抓取。",
             ),
+            AccountConfig(
+                name="导入账号C",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                enabled=True,
+                last_status="抓取失败",
+                last_deadline="",
+                last_note="页面未出现业务 iframe",
+            ),
         ]
 
         with (
@@ -621,6 +630,8 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertEqual(accounts_by_name["导入账号A"].last_status, "")
         self.assertEqual(accounts_by_name["导入账号A"].last_note, "")
         self.assertEqual(accounts_by_name["导入账号B"].last_deadline, "2026-04-21 11:42:31")
+        self.assertEqual(accounts_by_name["导入账号C"].last_status, "抓取失败")
+        self.assertEqual(accounts_by_name["导入账号C"].last_note, "页面未出现业务 iframe")
         mock_save_accounts.assert_called_once_with(window.accounts)
         self.assertIn("已清理推送后的抓取状态", window.log_edit.toPlainText())
 
@@ -977,7 +988,7 @@ class UiSmokeTestCase(unittest.TestCase):
 
         self.assertTrue(window.stop_fetch_button.isEnabled())
 
-    def test_stop_fetching_terminates_running_threads(self):
+    def test_stop_fetching_keeps_button_enabled_until_worker_exits(self):
         window = MainWindow()
         self.addCleanup(window.close)
         calls: list[str] = []
@@ -985,7 +996,6 @@ class UiSmokeTestCase(unittest.TestCase):
         class FakeTaskRunner:
             def cancel_all(self):
                 calls.append("cancel")
-                window._threads.clear()
 
             def shutdown(self):
                 return None
@@ -997,7 +1007,7 @@ class UiSmokeTestCase(unittest.TestCase):
         window.stop_fetching()
 
         self.assertEqual(calls, ["cancel"])
-        self.assertFalse(window.stop_fetch_button.isEnabled())
+        self.assertTrue(window.stop_fetch_button.isEnabled())
         self.assertIn("已请求停止当前后台抓取任务", window.log_edit.toPlainText())
 
     def test_run_auto_fetch_push_requires_webhook(self):

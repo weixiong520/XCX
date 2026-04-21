@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from dataclasses import fields
 from pathlib import Path
 from typing import Any, cast
@@ -42,6 +43,32 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 
 def read_json_file(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def _write_text_atomic(path: Path, content: str, encoding: str = "utf-8") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding=encoding,
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = temp_file.name
+            temp_file.write(content)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        Path(temp_path).replace(path)
+    except Exception:
+        if temp_path:
+            try:
+                Path(temp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
 
 
 def validate_shared_browser_profile_dir(profile_dir: str) -> str:
@@ -101,11 +128,9 @@ def ensure_runtime_dirs() -> None:
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     PY_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     if not ACCOUNTS_FILE.exists():
-        ACCOUNTS_FILE.write_text("[]\n", encoding="utf-8")
+        _write_text_atomic(ACCOUNTS_FILE, "[]\n")
     if not SETTINGS_FILE.exists():
-        SETTINGS_FILE.write_text(
-            json.dumps(AppSettings().to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
+        _write_text_atomic(SETTINGS_FILE, json.dumps(AppSettings().to_dict(), ensure_ascii=False, indent=2) + "\n")
 
 
 def load_accounts() -> list[AccountConfig]:
@@ -116,8 +141,8 @@ def load_accounts() -> list[AccountConfig]:
 
 def save_accounts(accounts: list[AccountConfig]) -> None:
     ensure_runtime_dirs()
-    ACCOUNTS_FILE.write_text(
-        json.dumps([account.to_dict() for account in accounts], ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    _write_text_atomic(
+        ACCOUNTS_FILE, json.dumps([account.to_dict() for account in accounts], ensure_ascii=False, indent=2) + "\n"
     )
 
 
@@ -131,7 +156,7 @@ def load_settings() -> AppSettings:
 
 def save_settings(settings: AppSettings) -> None:
     ensure_runtime_dirs()
-    SETTINGS_FILE.write_text(json.dumps(settings.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_text_atomic(SETTINGS_FILE, json.dumps(settings.to_dict(), ensure_ascii=False, indent=2) + "\n")
 
 
 def account_state_path(name: str) -> str:
@@ -158,13 +183,12 @@ def account_output_file(account_name: str, filename: str) -> Path:
 
 
 def write_account_output_text(account_name: str, filename: str, content: str) -> None:
-    account_output_file(account_name, filename).write_text(content, encoding="utf-8")
+    _write_text_atomic(account_output_file(account_name, filename), content)
 
 
 def write_account_output_json(account_name: str, filename: str, payload: object) -> None:
-    account_output_file(account_name, filename).write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    _write_text_atomic(
+        account_output_file(account_name, filename), json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     )
 
 

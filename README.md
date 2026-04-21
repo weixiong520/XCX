@@ -211,6 +211,13 @@ ruff check .
 python -m mypy
 ```
 
+### 单元测试与 pytest 校验
+
+```powershell
+python -m unittest discover -s py_tests -v
+python -m pytest py_tests -q
+```
+
 ## 推荐本地交付流程
 
 ```powershell
@@ -220,5 +227,6 @@ ruff format --check .
 ruff check .
 python -m mypy
 python -m unittest discover -s py_tests -v
+python -m pytest py_tests -q
 pwsh ./scripts/build_installer.ps1 -Clean
 ```

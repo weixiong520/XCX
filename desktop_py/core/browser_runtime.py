@@ -45,7 +45,11 @@ def required_browser_directories() -> list[str]:
 
 def playwright_browsers_ready() -> bool:
     root = configure_playwright_environment()
-    return all((root / name).exists() for name in required_browser_directories())
+    try:
+        required_directories = required_browser_directories()
+    except OSError, json.JSONDecodeError, KeyError, TypeError:
+        return False
+    return all((root / name).exists() for name in required_directories)
 
 
 def playwright_install_command() -> list[str]:

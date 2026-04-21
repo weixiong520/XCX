@@ -3,15 +3,17 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from desktop_py.core.models import AccountConfig
+from desktop_py.core.models import AccountConfig, AppSettings
 from desktop_py.core.store import (
     SHARED_BROWSER_PROFILE_DIR_NAME,
+    _write_text_atomic,
     account_output_file,
     account_state_path,
     load_accounts,
     load_settings,
     prepare_shared_browser_profile_dir,
     runtime_root,
+    save_accounts,
     save_settings,
     validate_shared_browser_profile_dir,
     write_account_output_json,
@@ -98,6 +100,52 @@ class StoreTestCase(unittest.TestCase):
             content = settings_path.read_text(encoding="utf-8")
 
         self.assertIn('"auto_fetch_push_enabled": true', content)
+
+    def test_persistent_writes_use_atomic_writer(self):
+        calls: list[tuple[Path, str]] = []
+
+        def fake_write(path: Path, content: str, encoding: str = "utf-8") -> None:
+            calls.append((path, content))
+
+        with TemporaryDirectory() as temp_dir:
+            accounts_path = Path(temp_dir) / "accounts.json"
+            settings_path = Path(temp_dir) / "settings.json"
+            output_root = Path(temp_dir) / "output"
+
+            with (
+                patch("desktop_py.core.store.ACCOUNTS_FILE", accounts_path),
+                patch("desktop_py.core.store.SETTINGS_FILE", settings_path),
+                patch("desktop_py.core.store.PY_OUTPUT_DIR", output_root),
+                patch("desktop_py.core.store.ensure_runtime_dirs"),
+                patch("desktop_py.core.store._write_text_atomic", side_effect=fake_write),
+            ):
+                save_accounts([AccountConfig(name="测试账号", state_path="storage/test.json")])
+                save_settings(AppSettings(feishu_webhook="demo"))
+                write_account_output_json("测试账号", "payload.json", {"ok": True})
+
+        self.assertEqual(
+            [path for path, _content in calls],
+            [
+                accounts_path,
+                settings_path,
+                output_root / "测试账号" / "payload.json",
+            ],
+        )
+        self.assertIn('"name": "测试账号"', calls[0][1])
+        self.assertIn('"feishu_webhook": "demo"', calls[1][1])
+        self.assertIn('"ok": true', calls[2][1])
+
+    def test_atomic_write_keeps_original_file_when_replace_fails(self):
+        with TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "settings.json"
+            target.write_text('{"old": true}\n', encoding="utf-8")
+
+            with patch("desktop_py.core.store.Path.replace", side_effect=OSError("replace failed")):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    _write_text_atomic(target, '{"new": true}\n')
+
+            self.assertEqual(target.read_text(encoding="utf-8"), '{"old": true}\n')
+            self.assertEqual(list(Path(temp_dir).glob("*.tmp")), [])
 
     def test_runtime_root_uses_executable_directory_when_frozen(self):
         with (

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
+
+from PySide6.QtCore import QObject
 
 from desktop_py.ui.workers import QueuedTask, TaskThread
 
@@ -9,7 +12,7 @@ class WindowTaskRunner:
     def __init__(
         self,
         *,
-        parent,
+        parent: QObject | None,
         threads: list[TaskThread],
         append_log: Callable[[str], None],
         update_action_buttons: Callable[[], None],
@@ -42,13 +45,13 @@ class WindowTaskRunner:
 
     def run(
         self,
-        job_builder,
-        on_success,
+        job_builder: Callable[..., Any],
+        on_success: Callable[[Any], None],
         *,
         emit_log: bool = True,
         emit_failure_log: bool = True,
         update_status: bool = True,
-        on_progress=None,
+        on_progress: Callable[[Any], None] | None = None,
     ) -> None:
         worker = self._ensure_worker()
         task = worker.enqueue(
@@ -72,8 +75,6 @@ class WindowTaskRunner:
             return
         self._pending_tasks.clear()
         self._worker.cancel_all()
-        if self._worker in self._threads:
-            self._threads.remove(self._worker)
         self._update_action_buttons()
 
     def shutdown(self) -> None:
@@ -83,16 +84,18 @@ class WindowTaskRunner:
         self.cancel_all()
         worker.shutdown()
         worker.wait(2000)
+        if worker in self._threads:
+            self._threads.remove(worker)
         self._worker = None
 
-    def _handle_task_succeeded(self, task: QueuedTask, result) -> None:
+    def _handle_task_succeeded(self, task: QueuedTask, result: Any) -> None:
         task.on_success(result)
 
     def _handle_task_message(self, task: QueuedTask, message: str) -> None:
         if task.emit_log:
             self._append_log(message)
 
-    def _handle_task_progress(self, task: QueuedTask, payload) -> None:
+    def _handle_task_progress(self, task: QueuedTask, payload: Any) -> None:
         if task.on_progress is not None:
             task.on_progress(payload)
 

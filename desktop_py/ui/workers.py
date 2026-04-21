@@ -3,23 +3,32 @@ from __future__ import annotations
 import inspect
 import queue
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import count
+from typing import Any
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from desktop_py.core.fetcher_support import CancelledError
+
+MessageEmitter = Callable[[str], None]
+ProgressEmitter = Callable[[Any], None]
+CancelCheck = Callable[[], bool]
+JobBuilder = Callable[..., Any]
+SuccessHandler = Callable[[Any], None]
+ProgressHandler = Callable[[Any], None]
 
 
 @dataclass
 class QueuedTask:
     task_id: int
-    job_builder: object
-    on_success: object
+    job_builder: JobBuilder
+    on_success: SuccessHandler
     emit_log: bool
     emit_failure_log: bool
     update_status: bool
-    on_progress: object | None
+    on_progress: ProgressHandler | None
 
 
 class TaskThread(QThread):
@@ -31,7 +40,7 @@ class TaskThread(QThread):
     task_finished = Signal(object)
     idle = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._queue: queue.Queue[QueuedTask | None] = queue.Queue()
         self._cancel_event = threading.Event()
@@ -42,12 +51,12 @@ class TaskThread(QThread):
     def enqueue(
         self,
         *,
-        job_builder,
-        on_success,
+        job_builder: JobBuilder,
+        on_success: SuccessHandler,
         emit_log: bool,
         emit_failure_log: bool,
         update_status: bool,
-        on_progress,
+        on_progress: ProgressHandler | None,
     ) -> QueuedTask:
         task = QueuedTask(
             task_id=next(self._task_ids),

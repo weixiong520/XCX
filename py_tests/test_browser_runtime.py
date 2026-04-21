@@ -55,6 +55,41 @@ class BrowserRuntimeTestCase(unittest.TestCase):
             ):
                 self.assertFalse(playwright_browsers_ready())
 
+    def test_playwright_browsers_ready_returns_false_when_metadata_missing(self):
+        with TemporaryDirectory() as temp_dir:
+            package_root = Path(temp_dir) / "package"
+            package_root.mkdir()
+
+            with (
+                patch("desktop_py.core.browser_runtime.browser_archive_root", return_value=package_root),
+                patch("desktop_py.core.browser_runtime.configure_playwright_environment", return_value=Path(temp_dir)),
+            ):
+                self.assertFalse(playwright_browsers_ready())
+
+    def test_playwright_browsers_ready_returns_false_when_metadata_is_invalid_json(self):
+        with TemporaryDirectory() as temp_dir:
+            package_root = Path(temp_dir) / "package"
+            package_root.mkdir()
+            (package_root / "browsers.json").write_text("{invalid", encoding="utf-8")
+
+            with (
+                patch("desktop_py.core.browser_runtime.browser_archive_root", return_value=package_root),
+                patch("desktop_py.core.browser_runtime.configure_playwright_environment", return_value=Path(temp_dir)),
+            ):
+                self.assertFalse(playwright_browsers_ready())
+
+    def test_playwright_browsers_ready_returns_false_when_metadata_shape_changes(self):
+        with TemporaryDirectory() as temp_dir:
+            package_root = Path(temp_dir) / "package"
+            package_root.mkdir()
+            (package_root / "browsers.json").write_text('{"unexpected":[]}', encoding="utf-8")
+
+            with (
+                patch("desktop_py.core.browser_runtime.browser_archive_root", return_value=package_root),
+                patch("desktop_py.core.browser_runtime.configure_playwright_environment", return_value=Path(temp_dir)),
+            ):
+                self.assertFalse(playwright_browsers_ready())
+
     def test_playwright_install_command_uses_python_in_source_mode(self):
         command = playwright_install_command()
         self.assertEqual(command[1:], ["-m", "playwright", "install", "chromium"])

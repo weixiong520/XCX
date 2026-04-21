@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from playwright.sync_api import Page, Response
 
+from desktop_py.core.models import AccountConfig
 from desktop_py.core.parser import convert_timestamp
 from desktop_py.core.store import validate_shared_browser_profile_dir
 
@@ -28,22 +30,32 @@ BUSINESS_IFRAME_SELECTORS = (
     "iframe[src*='refund']",
 )
 
+ValidateSharedBrowserProfileDir = Callable[[str], str]
+PathExists = Callable[[Path], bool]
+CancelCheck = Callable[[], bool]
+ExtractCurrentAccountName = Callable[[Page], str]
+Logger = Callable[[str], None]
 
-def normalize_profile_dir(profile_dir: str, *, validate_shared_browser_profile_dir_fn) -> str:
+
+def normalize_profile_dir(
+    profile_dir: str,
+    *,
+    validate_shared_browser_profile_dir_fn: ValidateSharedBrowserProfileDir,
+) -> str:
     if not profile_dir.strip():
         return ""
-    return validate_shared_browser_profile_dir_fn(profile_dir)
+    return cast(str, validate_shared_browser_profile_dir_fn(profile_dir))
 
 
-def account_state_path(account) -> Path:
+def account_state_path(account: AccountConfig) -> Path:
     return Path(account.state_path)
 
 
 def ensure_account_session_available(
-    account,
+    account: AccountConfig,
     normalized_profile_dir: str,
     *,
-    path_exists_fn,
+    path_exists_fn: PathExists,
     error_cls: type[Exception] | None = None,
 ) -> Path | None:
     state_path = account_state_path(account)
@@ -60,7 +72,7 @@ def wait_for_url_contains(
     page: Page,
     keywords: tuple[str, ...],
     timeout_ms: int = 5000,
-    is_cancelled: callable | None = None,
+    is_cancelled: CancelCheck | None = None,
 ) -> bool:
     deadline = time.monotonic() + (timeout_ms / 1000)
     while time.monotonic() < deadline:
@@ -75,17 +87,17 @@ def wait_for_current_account_name(
     page: Page,
     expected_name: str,
     timeout_ms: int = 5000,
-    is_cancelled: callable | None = None,
+    is_cancelled: CancelCheck | None = None,
     *,
-    extract_current_account_name_fn,
+    extract_current_account_name_fn: ExtractCurrentAccountName,
 ) -> str:
     deadline = time.monotonic() + (timeout_ms / 1000)
     while time.monotonic() < deadline:
-        actual_name = extract_current_account_name_fn(page)
+        actual_name = str(extract_current_account_name_fn(page)).strip()
         if actual_name and actual_name == expected_name:
             return actual_name
         wait_or_cancel(page, 250, is_cancelled)
-    return extract_current_account_name_fn(page)
+    return str(extract_current_account_name_fn(page)).strip()
 
 
 def business_iframe_selector(page: Page) -> str:
@@ -98,7 +110,7 @@ def business_iframe_selector(page: Page) -> str:
     return ""
 
 
-def wait_for_iframe_ready(page: Page, timeout_ms: int = 5000, is_cancelled: callable | None = None) -> bool:
+def wait_for_iframe_ready(page: Page, timeout_ms: int = 5000, is_cancelled: CancelCheck | None = None) -> bool:
     deadline = time.monotonic() + (timeout_ms / 1000)
     while time.monotonic() < deadline:
         selector = business_iframe_selector(page)
@@ -135,7 +147,7 @@ def wait_for_iframe_ready(page: Page, timeout_ms: int = 5000, is_cancelled: call
     return False
 
 
-def wait_or_cancel(page: Page, timeout_ms: int, is_cancelled: callable | None = None) -> None:
+def wait_or_cancel(page: Page, timeout_ms: int, is_cancelled: CancelCheck | None = None) -> None:
     if is_cancelled is not None and is_cancelled():
         raise CancelledError("任务已取消")
     page.wait_for_timeout(timeout_ms)
@@ -289,7 +301,12 @@ def build_feedback_url(page_url: str) -> str:
     )
 
 
-def create_browser_context(playwright, account, headless: bool, profile_dir: str = ""):
+def create_browser_context(
+    playwright: Any,
+    account: AccountConfig,
+    headless: bool,
+    profile_dir: str = "",
+) -> tuple[Any | None, Any]:
     normalized_profile_dir = validate_shared_browser_profile_dir(profile_dir) if profile_dir.strip() else ""
     if normalized_profile_dir:
         context = playwright.chromium.launch_persistent_context(
@@ -304,13 +321,18 @@ def create_browser_context(playwright, account, headless: bool, profile_dir: str
     return browser, context
 
 
-def _close_page(page) -> None:
+def _close_page(page: Any) -> None:
     close = getattr(page, "close", None)
     if callable(close):
         close()
 
 
-def _close_context_and_browser(context, browser, state_path: Path | None = None, persist_state: bool = False) -> None:
+def _close_context_and_browser(
+    context: Any,
+    browser: Any,
+    state_path: Path | None = None,
+    persist_state: bool = False,
+) -> None:
     context_error: Exception | None = None
     if persist_state and state_path is not None:
         try:
@@ -337,6 +359,6 @@ def _close_context_and_browser(context, browser, state_path: Path | None = None,
         raise browser_error
 
 
-def _log(logger: callable | None, message: str) -> None:
-    if logger:
+def _log(logger: Logger | None, message: str) -> None:
+    if logger is not None:
         logger(message)

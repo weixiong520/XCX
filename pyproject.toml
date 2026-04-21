@@ -30,6 +30,11 @@ files = [
   "desktop_py/core/store.py",
   "desktop_py/core/browser_runtime.py",
   "desktop_py/core/notifier.py",
+  "desktop_py/core/models.py",
+  "desktop_py/core/parser.py",
+  "desktop_py/core/fetcher_support.py",
+  "desktop_py/ui/task_runner.py",
+  "desktop_py/ui/workers.py",
 ]
 ignore_missing_imports = true
 check_untyped_defs = true

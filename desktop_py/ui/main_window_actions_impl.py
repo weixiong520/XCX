@@ -111,9 +111,9 @@ def stop_fetching(window) -> None:
         return
     window._task_runner.cancel_all()
     window._update_action_buttons()
-    window.append_log("已请求停止当前后台抓取任务。")
-    window.statusBar().showMessage("已停止后台任务", 4000)
-    window._set_status_text("后台任务已停止")
+    window.append_log("已请求停止当前后台抓取任务，正在等待当前任务退出。")
+    window.statusBar().showMessage("正在停止后台任务", 4000)
+    window._set_status_text("正在停止后台任务")
 
 
 def update_current_main_account(window, account_name: str, *, save_settings_fn) -> None:
@@ -637,6 +637,8 @@ def send_summary_with_webhook(
 def clear_pushed_fetch_state(window, *, save_accounts_fn) -> None:
     for account in window.accounts:
         if account.is_entry_account or not account.enabled:
+            continue
+        if account.last_status != "抓取成功" or not account.last_deadline.strip():
             continue
         account.last_deadline = ""
         account.last_status = ""
