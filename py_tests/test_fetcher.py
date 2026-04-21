@@ -1924,6 +1924,170 @@ class FetcherTestCase(unittest.TestCase):
         self.assertIn("storage:storage\\shared.json:True", calls)
         self.assertEqual(calls[-3:], ["storage:storage\\shared.json:True", "context", "browser"])
 
+    def test_renew_account_state_accepts_logged_in_backend_page_without_token_url(self):
+        calls: list[str] = []
+
+        class FakePageForRenew:
+            url = "https://mp.weixin.qq.com/"
+
+            def goto(self, _url, wait_until=None, timeout=None):
+                calls.append(f"goto:{_url}")
+
+            def wait_for_load_state(self, _state, timeout=None):
+                return None
+
+            def content(self):
+                return '<div class="menu_box_account_info_item">退出登录</div>'
+
+            def close(self):
+                calls.append("page")
+
+        class FakeContextForRenew:
+            def __init__(self):
+                self.page = FakePageForRenew()
+
+            def new_page(self):
+                return self.page
+
+            def storage_state(self, path=None, indexed_db=False):
+                calls.append(f"storage:{path}:{indexed_db}")
+
+            def close(self):
+                calls.append("context")
+
+        fake_browser = type("FakeBrowser", (), {"close": lambda self: calls.append("browser")})()
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                return_value=(fake_browser, FakeContextForRenew()),
+            ),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=False),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            valid = renew_account_state(
+                AccountConfig(name="主账号", state_path="storage/shared.json"),
+                profile_dir="",
+            )
+
+        self.assertTrue(valid)
+        self.assertIn("storage:storage\\shared.json:True", calls)
+
+    def test_renew_account_state_falls_back_to_saved_feedback_url(self):
+        calls: list[str] = []
+
+        class FakePageForRenew:
+            url = "https://mp.weixin.qq.com/"
+
+            def goto(self, url, wait_until=None, timeout=None):
+                self.url = url
+                calls.append(f"goto:{url}")
+
+            def close(self):
+                calls.append("page")
+
+        class FakeContextForRenew:
+            def __init__(self):
+                self.page = FakePageForRenew()
+
+            def new_page(self):
+                return self.page
+
+            def storage_state(self, path=None, indexed_db=False):
+                calls.append(f"storage:{path}:{indexed_db}")
+
+            def close(self):
+                calls.append("context")
+
+        fake_browser = type("FakeBrowser", (), {"close": lambda self: calls.append("browser")})()
+        feedback_url = "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current"
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                return_value=(fake_browser, FakeContextForRenew()),
+            ),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=False),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            valid = renew_account_state(
+                AccountConfig(name="主账号", state_path="storage/shared.json", feedback_url=feedback_url),
+                profile_dir="",
+            )
+
+        self.assertTrue(valid)
+        self.assertEqual(
+            calls[:2],
+            [
+                "goto:https://mp.weixin.qq.com/",
+                f"goto:{feedback_url}",
+            ],
+        )
+        self.assertIn("storage:storage\\shared.json:True", calls)
+
+    def test_renew_account_state_falls_back_to_feedback_url_when_home_timeout(self):
+        calls: list[str] = []
+
+        class FakePageForRenew:
+            url = "https://mp.weixin.qq.com/"
+
+            def goto(self, url, wait_until=None, timeout=None):
+                calls.append(f"goto:{url}")
+                if len(calls) == 1:
+                    raise PlaywrightTimeoutError("home timeout")
+                self.url = url
+
+            def close(self):
+                calls.append("page")
+
+        class FakeContextForRenew:
+            def __init__(self):
+                self.page = FakePageForRenew()
+
+            def new_page(self):
+                return self.page
+
+            def storage_state(self, path=None, indexed_db=False):
+                calls.append(f"storage:{path}:{indexed_db}")
+
+            def close(self):
+                calls.append("context")
+
+        fake_browser = type("FakeBrowser", (), {"close": lambda self: calls.append("browser")})()
+        feedback_url = "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current"
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                return_value=(fake_browser, FakeContextForRenew()),
+            ),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=False),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            valid = renew_account_state(
+                AccountConfig(name="主账号", state_path="storage/shared.json", feedback_url=feedback_url),
+                profile_dir="",
+            )
+
+        self.assertTrue(valid)
+        self.assertEqual(
+            calls[:2],
+            [
+                "goto:https://mp.weixin.qq.com/",
+                f"goto:{feedback_url}",
+            ],
+        )
+        self.assertIn("storage:storage\\shared.json:True", calls)
+
     def test_renew_account_state_does_not_overwrite_state_when_invalid(self):
         calls: list[str] = []
 
