@@ -1343,6 +1343,52 @@ class FetcherTestCase(unittest.TestCase):
         self.assertIn("处理截止时间", frame_text)
         self.assertEqual(page.wait_calls, [1])
 
+    def test_confirm_detail_deadline_default_window_tolerates_slow_first_load(self):
+        from desktop_py.core.fetcher_page_strategy import confirm_detail_deadline
+
+        page = FakePage()
+
+        class BodyLocator:
+            def __init__(self):
+                self._texts = [
+                    "详情加载中",
+                    "详情加载中",
+                    "详情加载中",
+                    "详情加载中",
+                    "详情加载中",
+                    "详情加载中",
+                    "处理截止时间：2026-04-22 16:02:09",
+                ]
+
+            def text_content(self, timeout=None):
+                if len(self._texts) > 1:
+                    return self._texts.pop(0)
+                return self._texts[0]
+
+            def inner_html(self, timeout=None):
+                return "<div>detail</div>"
+
+        body_locator = BodyLocator()
+
+        class FrameLocator:
+            def locator(self, selector):
+                return body_locator
+
+        deadline_text, frame_text, _frame_html = confirm_detail_deadline(
+            page=page,
+            frame_locator=FrameLocator(),
+            captures=[],
+            feedback_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+            extract_labeled_datetime_fn=extract_labeled_datetime,
+            fallback_from_responses_fn=lambda _captures: "",
+            filter_detail_captures_fn=lambda captures, _feedback_url: captures,
+            wait_or_cancel_fn=lambda _page, timeout_ms, _is_cancelled=None: page.wait_for_timeout(timeout_ms),
+        )
+
+        self.assertEqual(deadline_text, "2026-04-22 16:02:09")
+        self.assertIn("处理截止时间", frame_text)
+        self.assertEqual(page.wait_calls, [1500, 1500, 1500, 1500, 1500, 1500])
+
     def test_confirm_detail_deadline_prefers_detail_capture_over_dom(self):
         from desktop_py.core.fetcher_page_strategy import confirm_detail_deadline, filter_detail_captures
 

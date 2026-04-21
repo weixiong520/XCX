@@ -266,8 +266,8 @@ def confirm_detail_deadline(
     filter_detail_captures_fn,
     wait_or_cancel_fn,
     is_cancelled: callable | None = None,
-    retries: int = 3,
-    interval_ms: int = 1200,
+    retries: int = 8,
+    interval_ms: int = 1500,
 ) -> tuple[str, str, str]:
     latest_text = ""
     latest_html = ""
