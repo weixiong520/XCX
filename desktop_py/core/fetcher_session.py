@@ -7,7 +7,9 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from desktop_py.core.fetcher_support import (
     FetchError,
     ensure_account_session_available,
+    is_login_timeout_page,
     normalize_profile_dir,
+    recover_login_timeout_page,
     safe_page_content,
 )
 from desktop_py.core.models import AccountConfig
@@ -18,7 +20,6 @@ BACKEND_SESSION_CONTENT_KEYWORDS = (
     "current_login",
     "switch_account_dialog",
     "menu_box_account_info",
-    "退出登录",
     "切换账号",
 )
 
@@ -29,6 +30,8 @@ def _has_backend_session_url(page) -> bool:
 
 def _has_backend_session_content(page) -> bool:
     if not callable(getattr(page, "content", None)):
+        return False
+    if is_login_timeout_page(page, safe_page_content_fn=safe_page_content):
         return False
     try:
         html = safe_page_content(page, timeout_ms=1500)
@@ -54,8 +57,24 @@ def _probe_account_session_url(page, url: str, *, wait_for_url_contains_fn, time
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
     except PlaywrightTimeoutError:
+        if recover_login_timeout_page(
+            page,
+            safe_page_content_fn=safe_page_content,
+            wait_or_cancel_fn=lambda current_page, wait_ms, _is_cancelled=None: current_page.wait_for_timeout(wait_ms),
+        ):
+            return _wait_for_backend_session(
+                page, wait_for_url_contains_fn=wait_for_url_contains_fn, timeout_ms=timeout_ms
+            )
         return _has_backend_session(page)
-    return _wait_for_backend_session(page, wait_for_url_contains_fn=wait_for_url_contains_fn, timeout_ms=timeout_ms)
+    if _wait_for_backend_session(page, wait_for_url_contains_fn=wait_for_url_contains_fn, timeout_ms=timeout_ms):
+        return True
+    if recover_login_timeout_page(
+        page,
+        safe_page_content_fn=safe_page_content,
+        wait_or_cancel_fn=lambda current_page, wait_ms, _is_cancelled=None: current_page.wait_for_timeout(wait_ms),
+    ):
+        return _wait_for_backend_session(page, wait_for_url_contains_fn=wait_for_url_contains_fn, timeout_ms=timeout_ms)
+    return _has_backend_session(page)
 
 
 def _probe_account_session(page, account: AccountConfig, *, wait_for_url_contains_fn, timeout_ms: int) -> bool:

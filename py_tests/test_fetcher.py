@@ -31,6 +31,8 @@ from desktop_py.core.fetcher_support import (
     business_iframe_selector,
     classify_refund_response_type,
     extract_response_token,
+    is_login_timeout_page,
+    recover_login_timeout_page,
     safe_page_content,
     wait_for_iframe_ready,
     wait_for_url_contains,
@@ -38,6 +40,9 @@ from desktop_py.core.fetcher_support import (
 )
 from desktop_py.core.fetcher_switching import (
     find_switch_entry_impl as find_switch_entry,
+)
+from desktop_py.core.fetcher_switching import (
+    prepare_switch_account_page_impl as prepare_switch_account_page,
 )
 from desktop_py.core.fetcher_switching import (
     should_retry_switch_from_home_impl as should_retry_switch_from_home,
@@ -82,12 +87,21 @@ class FakeFrame:
 
 
 class FakeLocator:
-    def __init__(self, count: int = 0, counts: list[int] | None = None, frame=None, text: str = "", html: str = ""):
+    def __init__(
+        self,
+        count: int = 0,
+        counts: list[int] | None = None,
+        frame=None,
+        text: str = "",
+        html: str = "",
+        click_cb=None,
+    ):
         self._count = count
         self._counts = list(counts) if counts is not None else None
         self._frame = frame
         self._text = text
         self._html = html
+        self._click_cb = click_cb
         self.first = self
 
     def count(self) -> int:
@@ -98,6 +112,13 @@ class FakeLocator:
         return self._count
 
     def evaluate(self, _script):
+        if self._click_cb is not None:
+            self._click_cb()
+        return None
+
+    def click(self, timeout=None):
+        if self._click_cb is not None:
+            self._click_cb()
         return None
 
     def element_handle(self):
@@ -559,6 +580,135 @@ class FetcherTestCase(unittest.TestCase):
         self.assertEqual(content, "<html>ok</html>")
         self.assertIn(("domcontentloaded", 1000), page.load_state_calls)
         self.assertIn(("networkidle", 1000), page.load_state_calls)
+
+    def test_is_login_timeout_page_detects_recoverable_timeout_screen(self):
+        class TimeoutPage:
+            def __init__(self):
+                self.url = "https://mp.weixin.qq.com/"
+
+            def wait_for_load_state(self, state=None, timeout=None):
+                return None
+
+            def locator(self, selector, **kwargs):
+                if selector == "text=登录超时，请重新登录":
+                    return FakeLocator(count=1)
+                if selector == "text=小程序":
+                    return FakeLocator(count=1)
+                if selector == "text=退出登录":
+                    return FakeLocator(count=1)
+                return FakeLocator()
+
+            def content(self):
+                return "<div>登录超时，请重新登录</div><div>小程序</div><div>退出登录</div>"
+
+        self.assertTrue(is_login_timeout_page(TimeoutPage(), safe_page_content_fn=safe_page_content))
+
+    def test_recover_login_timeout_page_clicks_mini_program_entry(self):
+        class TimeoutPage:
+            def __init__(self):
+                self.url = "https://mp.weixin.qq.com/"
+                self.recovered = False
+
+            def wait_for_load_state(self, state=None, timeout=None):
+                return None
+
+            def wait_for_timeout(self, timeout):
+                return None
+
+            def locator(self, selector, **kwargs):
+                if selector == "text=登录超时，请重新登录":
+                    return FakeLocator(count=0 if self.recovered else 1)
+                if selector == "text=小程序":
+                    return FakeLocator(count=1, click_cb=self._recover)
+                if selector == "text=退出登录":
+                    return FakeLocator(count=1)
+                return FakeLocator()
+
+            def content(self):
+                if self.recovered:
+                    return '<div class="menu_box_account_info">账号设置</div>'
+                return "<div>登录超时，请重新登录</div><div>小程序</div><div>退出登录</div>"
+
+            def _recover(self):
+                self.recovered = True
+                self.url = "https://mp.weixin.qq.com/wxamp/index/index?token=1"
+
+        page = TimeoutPage()
+        recovered = recover_login_timeout_page(
+            page,
+            safe_page_content_fn=safe_page_content,
+            wait_or_cancel_fn=lambda current_page, wait_ms, _is_cancelled=None: current_page.wait_for_timeout(wait_ms),
+        )
+
+        self.assertTrue(recovered)
+        self.assertTrue(page.recovered)
+        self.assertIn("token=1", page.url)
+
+    def test_prepare_switch_account_page_recovers_login_timeout_screen(self):
+        class TimeoutPage:
+            def __init__(self):
+                self.url = "https://mp.weixin.qq.com/"
+                self.recovered = False
+                self.goto_calls: list[str] = []
+
+            def wait_for_load_state(self, state=None, timeout=None):
+                return None
+
+            def wait_for_timeout(self, timeout):
+                return None
+
+            def get_by_text(self, text, exact=False):
+                if text == "切换账号" and self.recovered:
+                    return FakeLocator(count=1)
+                return FakeLocator()
+
+            def locator(self, selector, **kwargs):
+                has_text = kwargs.get("has_text")
+                if selector == "text=登录超时，请重新登录":
+                    return FakeLocator(count=0 if self.recovered else 1)
+                if selector == "text=小程序":
+                    return FakeLocator(count=1, click_cb=self._recover)
+                if selector == "text=退出登录":
+                    return FakeLocator(count=1)
+                if selector == "div.menu_box_account_info_item[title='切换账号']":
+                    return FakeLocator(count=1 if self.recovered else 0)
+                if selector == ".menu_box_account_info_item" and has_text == "切换账号":
+                    return FakeLocator(count=1 if self.recovered else 0)
+                if selector == "[title='切换账号']":
+                    return FakeLocator(count=1 if self.recovered else 0)
+                if selector == ".switch_account_dialog":
+                    return FakeLocator(count=0)
+                if selector == ".switch_account_dialog .account_item":
+                    return FakeLocator(count=0)
+                return FakeLocator()
+
+            def content(self):
+                if self.recovered:
+                    return '<div class="menu_box_account_info_item" title="切换账号">切换账号</div>'
+                return "<div>登录超时，请重新登录</div><div>小程序</div><div>退出登录</div>"
+
+            def goto(self, url, wait_until=None, timeout=None):
+                self.goto_calls.append(url)
+                self.url = url
+
+            def _recover(self):
+                self.recovered = True
+                self.url = "https://mp.weixin.qq.com/wxamp/index/index?token=1"
+
+        page = TimeoutPage()
+        prepare_switch_account_page(
+            page,
+            "https://mp.weixin.qq.com/",
+            None,
+            switch_dialog_ready_fn=lambda _page: False,
+            find_switch_entry_fn=find_switch_entry,
+            should_retry_switch_from_home_fn=should_retry_switch_from_home,
+            log_fn=lambda *_args, **_kwargs: None,
+            wait_for_url_contains_fn=lambda *_args, **_kwargs: True,
+        )
+
+        self.assertTrue(page.recovered)
+        self.assertEqual(page.goto_calls, [])
 
     def test_fallback_from_responses_prefers_appeal_deadline_time(self):
         deadline = _fallback_from_responses(
@@ -1107,6 +1257,95 @@ class FetcherTestCase(unittest.TestCase):
         self.assertEqual(len(seen_confirm_captures), 1)
         self.assertEqual(len(seen_confirm_captures[0]), 1)
         self.assertEqual(seen_confirm_captures[0][0]["body"]["data"]["total_count"], 1)
+
+    def test_fetch_account_in_page_recovers_login_timeout_screen_before_opening_feedback(self):
+        class TimeoutThenReadyPage:
+            def __init__(self):
+                self.url = "https://mp.weixin.qq.com/"
+                self.recovered = False
+                self.goto_calls: list[str] = []
+
+            def goto(self, url, wait_until=None, timeout=None):
+                self.goto_calls.append(url)
+                self.url = url
+
+            def wait_for_load_state(self, state=None, timeout=None):
+                return None
+
+            def wait_for_timeout(self, timeout):
+                return None
+
+            def locator(self, selector, **kwargs):
+                if selector == "text=登录超时，请重新登录":
+                    return FakeLocator(count=0 if self.recovered else 1)
+                if selector == "text=小程序":
+                    return FakeLocator(count=1, click_cb=self._recover)
+                if selector == "text=退出登录":
+                    return FakeLocator(count=1)
+                return FakeLocator()
+
+            def content(self):
+                if self.recovered:
+                    return '<div class="menu_box_account_info">账号设置</div>'
+                return "<div>登录超时，请重新登录</div><div>小程序</div><div>退出登录</div>"
+
+            def _recover(self):
+                self.recovered = True
+                self.url = "https://mp.weixin.qq.com/wxamp/index/index?token=1"
+
+        page = TimeoutThenReadyPage()
+        account = AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False)
+
+        class FakeFrameLocator:
+            def locator(self, selector):
+                return FakeLocator(text="退款申请(0)")
+
+            def get_by_text(self, text, exact=False):
+                return FakeLocator(count=0)
+
+        result = fetch_account_in_page_impl(
+            page,
+            object(),
+            account,
+            None,
+            "",
+            None,
+            account_output_dir_fn=lambda _account_name: Path("output") / "账号A",
+            register_response_capture_fn=lambda _page, _capture: ([], lambda: None),
+            capture_response_payload_fn=lambda response: response,
+            resolve_bootstrap_url_fn=lambda _account, _output_dir: _account.home_url,
+            wait_for_url_contains_fn=lambda current_page, keywords, timeout_ms=0, is_cancelled=None: any(
+                keyword in current_page.url for keyword in keywords
+            ),
+            extract_current_account_name_fn=lambda _page: "账号A",
+            should_switch_for_account_fn=lambda _account, _current_account_name: False,
+            switch_to_account_fn=lambda *_args, **_kwargs: None,
+            log_fn=lambda *_args, **_kwargs: None,
+            open_feedback_page_fn=lambda _page, **_kwargs: "https://example.com/detail",
+            build_feedback_url_fn=lambda page_url: page_url,
+            wait_for_iframe_ready_fn=lambda *_args, **_kwargs: True,
+            resolve_frame_locator_fn=lambda *_args, **_kwargs: FakeFrameLocator(),
+            business_iframe_selector_fn=lambda _page: "#js_iframe",
+            safe_page_content_fn=lambda current_page: current_page.content(),
+            is_empty_refund_list_fn=lambda list_text: "退款申请(0)" in list_text,
+            confirm_empty_refund_list_fn=lambda **kwargs: (True, kwargs["initial_text"]),
+            build_empty_refund_result_fn=lambda **kwargs: FetchResult(
+                account_name=kwargs["account"].name,
+                ok=True,
+                actual_account_name=kwargs["account"].name,
+                page_url=kwargs["feedback_url"],
+            ),
+            build_detail_result_fn=lambda **kwargs: FetchResult(
+                account_name=kwargs["account"].name,
+                ok=True,
+                actual_account_name=kwargs["account"].name,
+                page_url=kwargs["feedback_url"],
+            ),
+        )
+
+        self.assertTrue(result.ok)
+        self.assertTrue(page.recovered)
+        self.assertIn("https://mp.weixin.qq.com/", page.goto_calls)
 
     def test_confirm_empty_refund_list_requires_second_confirmation(self):
         from desktop_py.core.fetcher_page_strategy import confirm_empty_refund_list
@@ -1974,6 +2213,86 @@ class FetcherTestCase(unittest.TestCase):
             )
 
         self.assertTrue(valid)
+        self.assertIn("storage:storage\\shared.json:True", calls)
+
+    def test_renew_account_state_recovers_login_timeout_page_via_mini_program_entry(self):
+        calls: list[str] = []
+
+        class FakePageForRenew:
+            def __init__(self):
+                self.url = "https://mp.weixin.qq.com/"
+                self.recovered = False
+
+            def goto(self, url, wait_until=None, timeout=None):
+                self.url = url
+                calls.append(f"goto:{url}")
+
+            def wait_for_load_state(self, state=None, timeout=None):
+                return None
+
+            def wait_for_timeout(self, timeout):
+                return None
+
+            def locator(self, selector, **kwargs):
+                if selector == "text=登录超时，请重新登录":
+                    return FakeLocator(count=0 if self.recovered else 1)
+                if selector == "text=小程序":
+                    return FakeLocator(count=1, click_cb=self._recover)
+                if selector == "text=退出登录":
+                    return FakeLocator(count=1)
+                return FakeLocator()
+
+            def content(self):
+                if self.recovered:
+                    return '<div class="menu_box_account_info_item">账号设置</div>'
+                return "<div>登录超时，请重新登录</div><div>小程序</div><div>退出登录</div>"
+
+            def close(self):
+                calls.append("page")
+
+            def _recover(self):
+                self.recovered = True
+                self.url = "https://mp.weixin.qq.com/wxamp/index/index?token=1"
+                calls.append("recover")
+
+        class FakeContextForRenew:
+            def __init__(self):
+                self.page = FakePageForRenew()
+
+            def new_page(self):
+                return self.page
+
+            def storage_state(self, path=None, indexed_db=False):
+                calls.append(f"storage:{path}:{indexed_db}")
+
+            def close(self):
+                calls.append("context")
+
+        fake_browser = type("FakeBrowser", (), {"close": lambda self: calls.append("browser")})()
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                return_value=(fake_browser, FakeContextForRenew()),
+            ),
+            patch(
+                "desktop_py.core.fetcher.wait_for_url_contains",
+                side_effect=lambda page, keywords, timeout_ms=0, is_cancelled=None: any(
+                    keyword in page.url for keyword in keywords
+                ),
+            ),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            valid = renew_account_state(
+                AccountConfig(name="主账号", state_path="storage/shared.json"),
+                profile_dir="",
+            )
+
+        self.assertTrue(valid)
+        self.assertIn("recover", calls)
         self.assertIn("storage:storage\\shared.json:True", calls)
 
     def test_renew_account_state_falls_back_to_saved_feedback_url(self):

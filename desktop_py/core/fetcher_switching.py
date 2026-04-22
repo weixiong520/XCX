@@ -5,7 +5,14 @@ import time
 
 from playwright.sync_api import Locator, Page
 
-from desktop_py.core.fetcher_support import FetchError, ensure_account_session_available, normalize_profile_dir
+from desktop_py.core.fetcher_support import (
+    FetchError,
+    ensure_account_session_available,
+    is_login_timeout_page,
+    normalize_profile_dir,
+    recover_login_timeout_page,
+    safe_page_content,
+)
 from desktop_py.core.models import AccountConfig
 
 
@@ -76,12 +83,28 @@ def prepare_switch_account_page_impl(
     log_fn,
     wait_for_url_contains_fn,
 ) -> None:
+    if is_login_timeout_page(page, safe_page_content_fn=safe_page_content):
+        recover_login_timeout_page(
+            page,
+            logger=logger,
+            log_fn=log_fn,
+            safe_page_content_fn=safe_page_content,
+            wait_or_cancel_fn=lambda current_page, wait_ms, _is_cancelled=None: current_page.wait_for_timeout(wait_ms),
+        )
     has_switch_entry = switch_dialog_ready_fn(page) or find_switch_entry_fn(page) is not None
     if not should_retry_switch_from_home_fn(page.url, home_url, has_switch_entry):
         return
     log_fn(logger, f"当前页面未发现切换入口，正在返回后台首页重试：{home_url}")
     page.goto(home_url, wait_until="domcontentloaded", timeout=60000)
     wait_for_url_contains_fn(page, ("token=", "/wxamp/index/index"), timeout_ms=4000)
+    if is_login_timeout_page(page, safe_page_content_fn=safe_page_content):
+        recover_login_timeout_page(
+            page,
+            logger=logger,
+            log_fn=log_fn,
+            safe_page_content_fn=safe_page_content,
+            wait_or_cancel_fn=lambda current_page, wait_ms, _is_cancelled=None: current_page.wait_for_timeout(wait_ms),
+        )
 
 
 def open_switch_account_dialog_impl(

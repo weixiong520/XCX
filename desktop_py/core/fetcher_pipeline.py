@@ -6,7 +6,9 @@ from desktop_py.core.fetcher_support import (
     CancelledError,
     FetchError,
     ensure_account_session_available,
+    is_login_timeout_page,
     normalize_profile_dir,
+    recover_login_timeout_page,
 )
 from desktop_py.core.models import AccountConfig, FetchResult
 
@@ -31,6 +33,17 @@ def _page_has_backend_session(page) -> bool:
     except Exception:
         return False
     return any(keyword in current_url for keyword in ("token=", "/wxamp/index/index", "pluginRedirect/gameFeedback"))
+
+
+def _recover_timeout_page_if_needed(page, *, logger, log_fn, safe_page_content_fn, is_cancelled):
+    return recover_login_timeout_page(
+        page,
+        logger=logger,
+        log_fn=log_fn,
+        safe_page_content_fn=safe_page_content_fn,
+        wait_or_cancel_fn=lambda current_page, wait_ms, cancelled=None: current_page.wait_for_timeout(wait_ms),
+        is_cancelled=is_cancelled,
+    )
 
 
 def _set_page_home_ready(page, ready: bool) -> None:
@@ -88,6 +101,19 @@ def fetch_account_in_page_impl(
             page.goto(bootstrap_url, wait_until="domcontentloaded", timeout=60000)
             wait_for_url_contains_fn(page, ("token=", "/wxamp/index/index"), timeout_ms=4000, is_cancelled=is_cancelled)
             _set_page_home_ready(page, bootstrap_url == account.home_url)
+
+        if is_login_timeout_page(page, safe_page_content_fn=safe_page_content_fn):
+            recovered = _recover_timeout_page_if_needed(
+                page,
+                logger=logger,
+                log_fn=log_fn,
+                safe_page_content_fn=safe_page_content_fn,
+                is_cancelled=is_cancelled,
+            )
+            if recovered:
+                wait_for_url_contains_fn(
+                    page, ("token=", "/wxamp/index/index"), timeout_ms=4000, is_cancelled=is_cancelled
+                )
 
         if "token=" not in page.url and bootstrap_url == account.home_url:
             raise FetchError("当前登录态未自动跳入后台页，且没有可复用的历史反馈页地址，无法启动自动切换账号。")

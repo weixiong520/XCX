@@ -29,6 +29,15 @@ BUSINESS_IFRAME_SELECTORS = (
     "iframe[src*='gameFeedback']",
     "iframe[src*='refund']",
 )
+LOGIN_TIMEOUT_PAGE_TEXT = "登录超时，请重新登录"
+LOGIN_TIMEOUT_NAV_TEXT = "小程序"
+LOGIN_TIMEOUT_EXIT_TEXT = "退出登录"
+MINI_PROGRAM_HOME_SELECTORS = (
+    "div:has-text('小程序')",
+    "span:has-text('小程序')",
+    "a:has-text('小程序')",
+    "text=小程序",
+)
 
 ValidateSharedBrowserProfileDir = Callable[[str], str]
 PathExists = Callable[[Path], bool]
@@ -153,6 +162,71 @@ def wait_or_cancel(page: Page, timeout_ms: int, is_cancelled: CancelCheck | None
     page.wait_for_timeout(timeout_ms)
     if is_cancelled is not None and is_cancelled():
         raise CancelledError("任务已取消")
+
+
+def _page_contains_text(page: Page, text: str, *, safe_page_content_fn) -> bool:
+    try:
+        html = safe_page_content_fn(page, timeout_ms=1500)
+    except Exception:
+        html = ""
+    if text in html:
+        return True
+    try:
+        return page.locator(f"text={text}").count() > 0
+    except Exception:
+        return False
+
+
+def is_login_timeout_page(page: Page, *, safe_page_content_fn) -> bool:
+    if not _page_contains_text(page, LOGIN_TIMEOUT_PAGE_TEXT, safe_page_content_fn=safe_page_content_fn):
+        return False
+    return _page_contains_text(
+        page, LOGIN_TIMEOUT_NAV_TEXT, safe_page_content_fn=safe_page_content_fn
+    ) or _page_contains_text(page, LOGIN_TIMEOUT_EXIT_TEXT, safe_page_content_fn=safe_page_content_fn)
+
+
+def recover_login_timeout_page(
+    page: Page,
+    *,
+    safe_page_content_fn,
+    wait_or_cancel_fn,
+    logger: Logger | None = None,
+    log_fn: Callable[[Logger | None, str], None] | None = None,
+    is_cancelled: CancelCheck | None = None,
+) -> bool:
+    if not is_login_timeout_page(page, safe_page_content_fn=safe_page_content_fn):
+        return False
+
+    if log_fn is not None:
+        log_fn(logger, "检测到后台登录超时页，尝试点击左上角“小程序”恢复。")
+
+    for selector in MINI_PROGRAM_HOME_SELECTORS:
+        try:
+            target = page.locator(selector)
+            if target.count() == 0:
+                continue
+            try:
+                target.first.click(timeout=1000)
+            except Exception:
+                target.first.evaluate("e => e.click()")
+            break
+        except Exception:
+            continue
+    else:
+        if log_fn is not None:
+            log_fn(logger, "后台登录超时页恢复失败：未找到左上角“小程序”入口。")
+        return False
+
+    for _ in range(15):
+        wait_or_cancel_fn(page, 300, is_cancelled)
+        if not is_login_timeout_page(page, safe_page_content_fn=safe_page_content_fn):
+            if log_fn is not None:
+                log_fn(logger, "后台登录超时页恢复成功。")
+            return True
+
+    if log_fn is not None:
+        log_fn(logger, "后台登录超时页恢复失败：点击“小程序”后页面仍停留在超时提示。")
+    return False
 
 
 def _is_navigation_content_error(error: Exception) -> bool:
