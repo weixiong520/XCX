@@ -16,8 +16,8 @@ def send_feishu_text(webhook: str, content: str) -> None:
 
 def build_summary(results: list[FetchResult]) -> str:
     pending_results = sorted(
-        [result for result in results if result.account_name.strip() and result.ok and result.deadline_text.strip()],
-        key=lambda item: _parse_deadline(item.deadline_text) or datetime.max,
+        [result for result in results if _should_include_in_summary(result)],
+        key=_summary_sort_key,
     )
     lines = [
         "微信退款处理截止时间日报",
@@ -33,7 +33,38 @@ def build_summary(results: list[FetchResult]) -> str:
 
 
 def _format_pending_result(index: int, result: FetchResult) -> str:
-    return f"{index}. {result.account_name}：截止 {result.deadline_text}{_actual_suffix(result)}"
+    parts: list[str] = []
+    if result.deadline_text.strip():
+        parts.append(f"未成年申请截止 {result.deadline_text}")
+    notification_summary = _notification_summary(result)
+    if notification_summary:
+        parts.append(notification_summary)
+    line = "；".join(parts)
+    return f"{index}. {result.account_name}：{line}{_actual_suffix(result)}"
+
+
+def _notification_summary(result: FetchResult) -> str:
+    note = str(result.note or "").strip()
+    if not note:
+        return ""
+    for segment in note.split("；"):
+        value = segment.strip()
+        if value.startswith("通知中心未读消息"):
+            return value
+    return ""
+
+
+def _should_include_in_summary(result: FetchResult) -> bool:
+    if not result.account_name.strip() or not result.ok:
+        return False
+    return bool(result.deadline_text.strip() or _notification_summary(result))
+
+
+def _summary_sort_key(result: FetchResult) -> tuple[int, datetime, str]:
+    deadline = _parse_deadline(result.deadline_text)
+    if deadline is not None:
+        return (0, deadline, result.account_name)
+    return (1, datetime.max, result.account_name)
 
 
 def _actual_suffix(result: FetchResult) -> str:
