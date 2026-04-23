@@ -58,6 +58,10 @@ from desktop_py.core.fetcher_switching import (
     wait_for_account_switch_stable_impl as wait_for_account_switch_stable,
 )
 from desktop_py.core.models import AccountConfig, FetchResult
+from desktop_py.core.notification_page_strategy import (
+    build_notification_summary,
+    filter_target_unread_notifications,
+)
 from desktop_py.core.parser import extract_labeled_datetime
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "fetcher"
@@ -644,6 +648,57 @@ class FetcherTestCase(unittest.TestCase):
         self.assertTrue(recovered)
         self.assertTrue(page.recovered)
         self.assertIn("token=1", page.url)
+
+    def test_filter_target_unread_notifications_only_keeps_unread_target_titles(self):
+        items = [
+            {
+                "notify_id": "1",
+                "class_name": "notice_item js_msg_item",
+                "title": "小程序微信认证年审通知",
+                "time_text": "2026-04-19",
+                "content_text": "年审内容",
+            },
+            {
+                "notify_id": "2",
+                "class_name": "notice_item js_msg_item readed",
+                "title": "小程序微信认证年审通知",
+                "time_text": "2026-04-12",
+                "content_text": "已读年审",
+            },
+            {
+                "notify_id": "3",
+                "class_name": "notice_item js_msg_item",
+                "title": "其它通知",
+                "time_text": "2026-04-10",
+                "content_text": "其它内容",
+            },
+        ]
+
+        result = filter_target_unread_notifications(items, "账号A")
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "account_name": "账号A",
+                    "notify_id": "1",
+                    "title": "小程序微信认证年审通知",
+                    "time_text": "2026-04-19",
+                    "content_text": "年审内容",
+                    "is_unread": True,
+                    "matched_rule": "annual_review",
+                }
+            ],
+        )
+
+    def test_build_notification_summary_formats_count_and_titles(self):
+        summary = build_notification_summary(
+            [
+                {"title": "小程序微信认证年审通知"},
+                {"title": "你的账号收到一条侵权投诉"},
+            ]
+        )
+        self.assertEqual(summary, "通知中心未读消息 2 条：小程序微信认证年审通知、你的账号收到一条侵权投诉")
 
     def test_prepare_switch_account_page_recovers_login_timeout_screen(self):
         class TimeoutPage:
@@ -1258,6 +1313,68 @@ class FetcherTestCase(unittest.TestCase):
         self.assertEqual(len(seen_confirm_captures), 1)
         self.assertEqual(len(seen_confirm_captures[0]), 1)
         self.assertEqual(seen_confirm_captures[0][0]["body"]["data"]["total_count"], 1)
+
+    def test_fetch_account_in_page_appends_notification_summary(self):
+        class DemoPage:
+            def __init__(self):
+                self.url = "https://mp.weixin.qq.com/wxamp/index/index?token=1"
+
+        page = DemoPage()
+        account = AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False)
+
+        class FrameLocator:
+            def locator(self, selector):
+                return FakeLocator(text="退款申请(0)")
+
+            def get_by_text(self, text, exact=False):
+                return FakeLocator(count=0)
+
+        result = fetch_account_in_page_impl(
+            page,
+            object(),
+            account,
+            None,
+            "",
+            None,
+            account_output_dir_fn=lambda _account_name: Path("output") / "账号A",
+            register_response_capture_fn=lambda _page, _capture: ([], lambda: None),
+            capture_response_payload_fn=lambda response: response,
+            resolve_bootstrap_url_fn=lambda _account, _output_dir: _account.home_url,
+            wait_for_url_contains_fn=lambda *_args, **_kwargs: True,
+            extract_current_account_name_fn=lambda _page: "账号A",
+            should_switch_for_account_fn=lambda _account, _current_account_name: False,
+            switch_to_account_fn=lambda *_args, **_kwargs: None,
+            log_fn=lambda *_args, **_kwargs: None,
+            open_feedback_page_fn=lambda _page, **_kwargs: "https://example.com/detail",
+            build_feedback_url_fn=lambda page_url: page_url,
+            wait_for_iframe_ready_fn=lambda *_args, **_kwargs: True,
+            resolve_frame_locator_fn=lambda *_args, **_kwargs: FrameLocator(),
+            business_iframe_selector_fn=lambda _page: "#js_iframe",
+            safe_page_content_fn=lambda _page: "<html></html>",
+            fetch_notifications_fn=lambda *_args, **_kwargs: {
+                "ok": True,
+                "notifications": [{"title": "小程序微信认证年审通知"}],
+                "summary": "通知中心未读消息 1 条：小程序微信认证年审通知",
+                "page_url": "https://example.com/notice",
+            },
+            is_empty_refund_list_fn=lambda list_text: "退款申请(0)" in list_text,
+            confirm_empty_refund_list_fn=lambda **kwargs: (True, kwargs["initial_text"]),
+            build_empty_refund_result_fn=lambda **kwargs: FetchResult(
+                account_name=kwargs["account"].name,
+                ok=True,
+                actual_account_name=kwargs["account"].name,
+                page_url=kwargs["feedback_url"],
+            ),
+            build_detail_result_fn=lambda **kwargs: FetchResult(
+                account_name=kwargs["account"].name,
+                ok=True,
+                actual_account_name=kwargs["account"].name,
+                page_url=kwargs["feedback_url"],
+            ),
+        )
+
+        self.assertTrue(result.ok)
+        self.assertIn("通知中心未读消息 1 条：小程序微信认证年审通知", result.note)
 
     def test_fetch_account_in_page_recovers_login_timeout_screen_before_opening_feedback(self):
         class TimeoutThenReadyPage:

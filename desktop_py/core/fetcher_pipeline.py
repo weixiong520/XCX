@@ -11,6 +11,7 @@ from desktop_py.core.fetcher_support import (
     recover_login_timeout_page,
 )
 from desktop_py.core.models import AccountConfig, FetchResult
+from desktop_py.core.store import write_fetch_result
 
 
 def _page_current_account_name(page) -> str:
@@ -87,6 +88,7 @@ def fetch_account_in_page_impl(
     resolve_frame_locator_fn,
     business_iframe_selector_fn,
     safe_page_content_fn,
+    fetch_notifications_fn=None,
     is_empty_refund_list_fn,
     confirm_empty_refund_list_fn,
     build_empty_refund_result_fn,
@@ -94,6 +96,12 @@ def fetch_account_in_page_impl(
 ) -> FetchResult:
     output_dir = account_output_dir_fn(account.name)
     captures, cleanup_response_capture = register_response_capture_fn(page, capture_response_payload_fn)
+    notification_outcome = {
+        "ok": False,
+        "notifications": [],
+        "summary": "",
+        "page_url": "",
+    }
 
     try:
         bootstrap_url = resolve_bootstrap_url_fn(account, output_dir)
@@ -131,6 +139,18 @@ def fetch_account_in_page_impl(
             log_fn(logger, "入口账号使用当前共享会话，不执行切换账号。")
         else:
             log_fn(logger, f"账号 {account.name} 已处于当前会话，跳过切换步骤。")
+
+        if callable(fetch_notifications_fn):
+            notification_outcome = fetch_notifications_fn(
+                page,
+                account=account,
+                logger=logger,
+                output_dir=output_dir,
+                log_fn=log_fn,
+                wait_for_url_contains_fn=wait_for_url_contains_fn,
+                safe_page_content_fn=safe_page_content_fn,
+                is_cancelled=is_cancelled,
+            )
 
         feedback_capture_start = len(captures)
         feedback_url = open_feedback_page_fn(
@@ -191,6 +211,13 @@ def fetch_account_in_page_impl(
             )
         if result.actual_account_name.strip():
             _set_page_current_account_name(page, result.actual_account_name)
+        notification_summary = str(notification_outcome.get("summary", "") or "").strip()
+        if notification_outcome.get("notifications") or not notification_outcome.get("ok", True):
+            result.note = "；".join(item for item in [result.note, notification_summary] if item)
+        if notification_outcome.get("notifications"):
+            write_fetch_result(account.name, result, extra={"notifications": notification_outcome["notifications"]})
+        elif not notification_outcome.get("ok", True) and notification_summary:
+            write_fetch_result(account.name, result)
         _set_page_home_ready(page, False)
         return result
     finally:

@@ -82,6 +82,7 @@ from desktop_py.core.fetcher_switching import (
     wait_for_switch_account_items_impl,
 )
 from desktop_py.core.models import AccountConfig, FetchResult
+from desktop_py.core.notification_page_strategy import fetch_notifications
 from desktop_py.core.parser import extract_labeled_datetime
 from desktop_py.core.store import account_output_dir, validate_shared_browser_profile_dir
 
@@ -355,6 +356,7 @@ def _fetch_account_in_page(
         resolve_frame_locator_fn=resolve_frame_locator,
         business_iframe_selector_fn=business_iframe_selector,
         safe_page_content_fn=safe_page_content,
+        fetch_notifications_fn=fetch_notifications,
         is_empty_refund_list_fn=is_empty_refund_list,
         confirm_empty_refund_list_fn=lambda **kwargs: confirm_empty_refund_list(
             **kwargs,
