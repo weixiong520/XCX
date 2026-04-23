@@ -454,7 +454,7 @@ def auto_fetch_and_send(window) -> None:
         return
     window._run_thread(
         window._build_fetch_job(enabled_accounts),
-        on_success=lambda _results: window._send_summary_with_webhook(webhook, append_batch_log=True),
+        on_success=lambda results: _handle_auto_summary_after_fetch(window, webhook, results),
         on_progress=window._mark_fetch_progress,
     )
 
@@ -534,9 +534,26 @@ def run_auto_fetch_push(window) -> None:
     window.append_log("开始执行每日自动抓取推送。")
     window._run_thread(
         window._build_fetch_job(enabled_accounts),
-        on_success=lambda _results: window._send_summary_with_webhook(webhook, append_batch_log=True),
+        on_success=lambda results: _handle_auto_summary_after_fetch(window, webhook, results),
         on_progress=window._mark_fetch_progress,
     )
+
+
+AUTO_PUSH_SKIP_NOTE = "当前登录态未自动跳入后台页，且没有可复用的历史反馈页地址，无法启动自动切换账号。"
+
+
+def should_skip_auto_summary_for_results(results: list) -> bool:
+    if not results:
+        return False
+    return all(str(getattr(result, "note", "") or "").strip() == AUTO_PUSH_SKIP_NOTE for result in results)
+
+
+def _handle_auto_summary_after_fetch(window, webhook: str, results: list) -> None:
+    if should_skip_auto_summary_for_results(results):
+        window.append_log("批量抓取已完成。")
+        window.append_log("自动抓取推送已跳过：当前登录态未进入后台页，且没有可复用的历史反馈页地址。")
+        return
+    window._send_summary_with_webhook(webhook, append_batch_log=True)
 
 
 def build_fetch_job(window, enabled_accounts: list, *, fetch_accounts_batch_fn):

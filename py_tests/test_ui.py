@@ -689,6 +689,63 @@ class UiSmokeTestCase(unittest.TestCase):
             on_success([])
         mock_send.assert_called_once()
 
+    def test_auto_fetch_and_send_skips_summary_when_all_results_match_backend_entry_failure(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True, enabled=True),
+            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True),
+            AccountConfig(name="导入账号B", state_path="storage/shared.json", is_entry_account=False, enabled=True),
+        ]
+        window.webhook_edit.setText("https://open.feishu.cn/open-apis/bot/v2/hook/demo")
+
+        with patch.object(window, "_run_thread") as mock_run_thread:
+            window.auto_fetch_and_send()
+
+        on_success = mock_run_thread.call_args.kwargs["on_success"]
+        results = [
+            FetchResult(
+                account_name="导入账号A",
+                ok=False,
+                note="当前登录态未自动跳入后台页，且没有可复用的历史反馈页地址，无法启动自动切换账号。",
+            ),
+            FetchResult(
+                account_name="导入账号B",
+                ok=False,
+                note="当前登录态未自动跳入后台页，且没有可复用的历史反馈页地址，无法启动自动切换账号。",
+            ),
+        ]
+        with patch.object(window, "_send_summary_with_webhook") as mock_send:
+            on_success(results)
+        mock_send.assert_not_called()
+        self.assertIn("自动抓取推送已跳过", window.log_edit.toPlainText())
+
+    def test_auto_fetch_and_send_still_sends_summary_when_results_are_mixed(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True, enabled=True),
+            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True),
+            AccountConfig(name="导入账号B", state_path="storage/shared.json", is_entry_account=False, enabled=True),
+        ]
+        window.webhook_edit.setText("https://open.feishu.cn/open-apis/bot/v2/hook/demo")
+
+        with patch.object(window, "_run_thread") as mock_run_thread:
+            window.auto_fetch_and_send()
+
+        on_success = mock_run_thread.call_args.kwargs["on_success"]
+        results = [
+            FetchResult(
+                account_name="导入账号A",
+                ok=False,
+                note="当前登录态未自动跳入后台页，且没有可复用的历史反馈页地址，无法启动自动切换账号。",
+            ),
+            FetchResult(account_name="导入账号B", ok=True, note="已完成详情页抓取。"),
+        ]
+        with patch.object(window, "_send_summary_with_webhook") as mock_send:
+            on_success(results)
+        mock_send.assert_called_once()
+
     def test_build_fetch_job_uses_batch_fetcher(self):
         window = MainWindow()
         self.addCleanup(window.close)
