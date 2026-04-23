@@ -189,17 +189,19 @@ def save_login_state(
     logger: callable | None = None,
     is_cancelled: callable | None = None,
 ) -> str:
-    return save_login_state_impl(
-        account,
-        wait_seconds,
-        logger,
-        is_cancelled,
-        sync_playwright_fn=sync_playwright,
-        datetime_cls=datetime,
-        log_fn=_log,
-        wait_or_cancel_fn=wait_or_cancel,
-        close_page_fn=_close_page,
-        close_context_and_browser_fn=_close_context_and_browser,
+    return _run_blocking_fetch_call(
+        lambda: save_login_state_impl(
+            account,
+            wait_seconds,
+            logger,
+            is_cancelled,
+            sync_playwright_fn=sync_playwright,
+            datetime_cls=datetime,
+            log_fn=_log,
+            wait_or_cancel_fn=wait_or_cancel,
+            close_page_fn=_close_page,
+            close_context_and_browser_fn=_close_context_and_browser,
+        )
     )
 
 
@@ -210,19 +212,21 @@ def save_login_state_with_profile(
     logger: callable | None = None,
     is_cancelled: callable | None = None,
 ) -> str:
-    return save_login_state_with_profile_impl(
-        account,
-        wait_seconds,
-        profile_dir,
-        logger,
-        is_cancelled,
-        sync_playwright_fn=sync_playwright,
-        datetime_cls=datetime,
-        validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir,
-        log_fn=_log,
-        wait_or_cancel_fn=wait_or_cancel,
-        close_page_fn=_close_page,
-        close_context_and_browser_fn=_close_context_and_browser,
+    return _run_blocking_fetch_call(
+        lambda: save_login_state_with_profile_impl(
+            account,
+            wait_seconds,
+            profile_dir,
+            logger,
+            is_cancelled,
+            sync_playwright_fn=sync_playwright,
+            datetime_cls=datetime,
+            validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir,
+            log_fn=_log,
+            wait_or_cancel_fn=wait_or_cancel,
+            close_page_fn=_close_page,
+            close_context_and_browser_fn=_close_context_and_browser,
+        )
     )
 
 

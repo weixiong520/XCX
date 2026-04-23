@@ -14,6 +14,7 @@ from desktop_py.core.fetcher import (
     fetch_switchable_accounts,
     renew_account_state,
     save_login_state,
+    save_login_state_with_profile,
     validate_account_state,
     wait_for_current_account_name,
     wait_for_switch_account_items,
@@ -2556,6 +2557,38 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertTrue(valid)
         self.assertEqual(call_count, 1)
+
+    def test_save_login_state_runs_in_helper_thread_when_asyncio_loop_exists(self):
+        account = AccountConfig(name="主账号", state_path="storage/shared.json")
+
+        async def runner():
+            with patch(
+                "desktop_py.core.fetcher.save_login_state_impl", return_value="storage/shared.json"
+            ) as mock_impl:
+                state_path = save_login_state(account, 120)
+            return state_path, mock_impl.call_count
+
+        state_path, call_count = asyncio.run(runner())
+
+        self.assertEqual(state_path, "storage/shared.json")
+        self.assertEqual(call_count, 1)
+
+    def test_save_login_state_with_profile_runs_in_helper_thread_when_asyncio_loop_exists(self):
+        account = AccountConfig(name="主账号", state_path="storage/shared.json")
+
+        async def runner():
+            with patch(
+                "desktop_py.core.fetcher.save_login_state_with_profile_impl",
+                return_value="storage/shared.json",
+            ) as mock_impl:
+                state_path = save_login_state_with_profile(account, 120, "C:/profile")
+            return state_path, mock_impl.call_count, mock_impl.call_args.args
+
+        state_path, call_count, args = asyncio.run(runner())
+
+        self.assertEqual(state_path, "storage/shared.json")
+        self.assertEqual(call_count, 1)
+        self.assertEqual(args[:3], (account, 120, "C:/profile"))
 
     def test_renew_account_state_runs_in_helper_thread_when_asyncio_loop_exists(self):
         account = AccountConfig(name="主账号", state_path="storage/shared.json")
