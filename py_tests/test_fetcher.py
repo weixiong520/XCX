@@ -1834,6 +1834,71 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertEqual(deadline_text, "2026-04-27 08:37:32")
 
+    def test_filter_detail_captures_ignores_non_refund_urls_and_stale_tokens(self):
+        from desktop_py.core.fetcher_page_strategy import filter_detail_captures
+
+        captures = [
+            "not a dict",
+            {"response_type": "detail", "url": ""},
+            {
+                "response_type": "detail",
+                "token": "old",
+                "url": "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=old",
+            },
+            {
+                "response_type": "unknown",
+                "token": "current",
+                "url": "https://example.com/metrics?token=current",
+            },
+            {
+                "response_type": "detail",
+                "token": "current",
+                "url": "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+            },
+            {
+                "response_type": "unknown",
+                "token": "current",
+                "url": "https://mp.weixin.qq.com/refund/api?token=current",
+            },
+        ]
+
+        filtered = filter_detail_captures(
+            captures,
+            "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+        )
+
+        self.assertEqual([item["url"] for item in filtered], [captures[4]["url"], captures[5]["url"]])
+
+    def test_extract_deadline_from_captures_prefers_latest_detail_over_list(self):
+        from desktop_py.core.fetcher_page_strategy import extract_deadline_from_captures
+
+        captures = [
+            {
+                "response_type": "list",
+                "body": {"data": {"user_refund_check_list": [{"ctrl_info": {"deadline_time": "1777046400"}}]}},
+            },
+            {
+                "response_type": "detail",
+                "body": {
+                    "data": {"user_refund_check_list": [{"ctrl_info": {"appeal_deadline_time": "2026-04-27 08:37:32"}}]}
+                },
+            },
+        ]
+
+        self.assertEqual(extract_deadline_from_captures(captures), "2026-04-27 08:37:32")
+
+    def test_captures_indicate_non_empty_refunds_does_not_treat_empty_count_as_pending(self):
+        from desktop_py.core.fetcher_page_strategy import captures_indicate_non_empty_refunds
+
+        captures = [
+            {
+                "response_type": "list",
+                "body": {"data": {"count": 0, "total_count": 0, "user_refund_check_list": []}},
+            }
+        ]
+
+        self.assertFalse(captures_indicate_non_empty_refunds(captures))
+
     def test_build_detail_result_only_uses_captures_after_action_click(self):
         from desktop_py.core.fetcher_page_strategy import build_detail_result
 
@@ -2766,7 +2831,6 @@ class FetcherTestCase(unittest.TestCase):
         self.assertTrue(valid)
         self.assertEqual(call_count, 1)
 
-
     def test_renew_account_state_persists_after_page_already_closed(self):
         calls: list[str] = []
 
@@ -2814,7 +2878,9 @@ class FetcherTestCase(unittest.TestCase):
         ):
             mock_playwright.return_value.__enter__.return_value = object()
 
-            valid = renew_account_state(AccountConfig(name="accountA", state_path="storage/shared.json"), profile_dir="")
+            valid = renew_account_state(
+                AccountConfig(name="accountA", state_path="storage/shared.json"), profile_dir=""
+            )
 
         self.assertTrue(valid)
         self.assertIn("page", calls)

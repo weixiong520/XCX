@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$Clean,
     [switch]$IncludeOfflineChromium
 )
@@ -26,7 +26,7 @@ function Resolve-InnoCompilerPath {
         return $compilerPath
     }
 
-    throw "未找到项目内 Inno Setup 编译器。请先准备 tools\inno\ISCC.exe。"
+    throw "Inno Setup compiler not found at tools\inno\ISCC.exe."
 }
 
 function Assert-PyInstallerAvailable {
@@ -34,7 +34,7 @@ function Assert-PyInstallerAvailable {
         python -m PyInstaller --version | Out-Null
     }
     catch {
-        throw "未检测到 PyInstaller。请先执行：python -m pip install -r requirements-build.txt"
+        throw "PyInstaller is not available. Run: python -m pip install -r requirements-build.txt"
     }
 }
 
@@ -45,7 +45,7 @@ function Resolve-OfflineRuntimeSource {
 
     $runtimePath = Join-Path $ProjectRoot "ms-playwright"
     if (-not (Test-Path $runtimePath)) {
-        throw "未找到离线浏览器运行时目录。请先准备项目根目录下的 ms-playwright。"
+        throw "Offline browser runtime not found. Prepare ms-playwright in the project root first."
     }
     return $runtimePath
 }
@@ -68,7 +68,7 @@ $offlineRuntimeSource = if ($IncludeOfflineChromium) {
 $installerScript = if ($Clean) {
     Join-Path $PSScriptRoot "installer_clean.iss"
 } else {
-    throw "当前仅支持基于干净源目录构建安装包，请传入 -Clean。"
+    throw "Only clean installer builds are supported. Pass -Clean."
 }
 
 Push-Location $projectRoot
@@ -81,7 +81,7 @@ try {
     }
     New-Item -ItemType Directory -Path $installerSourceRoot -Force | Out-Null
 
-    Write-Host "开始构建安装包..."
+    Write-Host "Building installer package..."
     python -m PyInstaller `
         --noconfirm `
         --clean `
@@ -137,12 +137,10 @@ try {
     if (Test-Path $installerSourceRoot) {
         Remove-Item -LiteralPath $installerSourceRoot -Recurse -Force
     }
-    if ($IncludeOfflineChromium) {
-        Write-Host "离线版安装包构建完成：$(Join-Path $distRoot "installer\$outputBaseFilename.exe")"
-    } else {
-        Write-Host "标准版安装包构建完成：$(Join-Path $distRoot "installer\$outputBaseFilename.exe")"
-    }
+
+    Write-Host "Installer build complete: $(Join-Path $distRoot "installer\$outputBaseFilename.exe")"
 }
 finally {
     Pop-Location
 }
+

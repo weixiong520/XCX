@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from playwright.sync_api import Page, Response
@@ -45,8 +45,13 @@ PathExists = Callable[[Path], bool]
 CancelCheck = Callable[[], bool]
 ExtractCurrentAccountName = Callable[[Page], str]
 Logger = Callable[[str], None]
+WaitOrCancel = Callable[[Page, int, CancelCheck | None], None]
 STORAGE_STATE_RETRY_DELAYS_MS = (1000, 2000)
 STORAGE_STATE_SETTLE_MS = 1200
+
+
+class SafePageContent(Protocol):
+    def __call__(self, page: Page, timeout_ms: int = ...) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -189,7 +194,7 @@ def _wait_or_sleep(
     page: Page | None,
     timeout_ms: int,
     *,
-    wait_or_cancel_fn,
+    wait_or_cancel_fn: WaitOrCancel,
     is_cancelled: CancelCheck | None = None,
 ) -> None:
     if _page_is_closed(page):
@@ -208,12 +213,13 @@ def _wait_or_sleep(
 def _wait_for_storage_state_ready(
     page: Page | None,
     *,
-    wait_or_cancel_fn,
+    wait_or_cancel_fn: WaitOrCancel,
     is_cancelled: CancelCheck | None = None,
     settle_ms: int = STORAGE_STATE_SETTLE_MS,
 ) -> None:
     if _page_is_closed(page):
         return
+    assert page is not None
     try:
         page.wait_for_load_state("domcontentloaded", timeout=1500)
     except Exception:
@@ -239,7 +245,7 @@ def persist_storage_state(
     page: Page | None = None,
     logger: Logger | None = None,
     log_fn: Callable[[Logger | None, str], None] | None = None,
-    wait_or_cancel_fn=wait_or_cancel,
+    wait_or_cancel_fn: WaitOrCancel = wait_or_cancel,
     is_cancelled: CancelCheck | None = None,
     retry_delays_ms: tuple[int, ...] = STORAGE_STATE_RETRY_DELAYS_MS,
 ) -> StorageStateSaveResult:
@@ -276,7 +282,7 @@ def persist_storage_state(
     return StorageStateSaveResult(attempts=total_attempts)
 
 
-def _page_contains_text(page: Page, text: str, *, safe_page_content_fn) -> bool:
+def _page_contains_text(page: Page, text: str, *, safe_page_content_fn: SafePageContent) -> bool:
     try:
         html = safe_page_content_fn(page, timeout_ms=1500)
     except Exception:
@@ -289,7 +295,7 @@ def _page_contains_text(page: Page, text: str, *, safe_page_content_fn) -> bool:
         return False
 
 
-def is_login_timeout_page(page: Page, *, safe_page_content_fn) -> bool:
+def is_login_timeout_page(page: Page, *, safe_page_content_fn: SafePageContent) -> bool:
     if not _page_contains_text(page, LOGIN_TIMEOUT_PAGE_TEXT, safe_page_content_fn=safe_page_content_fn):
         return False
     return _page_contains_text(
@@ -300,8 +306,8 @@ def is_login_timeout_page(page: Page, *, safe_page_content_fn) -> bool:
 def recover_login_timeout_page(
     page: Page,
     *,
-    safe_page_content_fn,
-    wait_or_cancel_fn,
+    safe_page_content_fn: SafePageContent,
+    wait_or_cancel_fn: WaitOrCancel,
     logger: Logger | None = None,
     log_fn: Callable[[Logger | None, str], None] | None = None,
     is_cancelled: CancelCheck | None = None,
@@ -521,7 +527,7 @@ def _close_context_and_browser(
     page: Page | None = None,
     logger: Logger | None = None,
     log_fn: Callable[[Logger | None, str], None] | None = None,
-    wait_or_cancel_fn=wait_or_cancel,
+    wait_or_cancel_fn: WaitOrCancel = wait_or_cancel,
     is_cancelled: CancelCheck | None = None,
 ) -> None:
     context_error: Exception | None = None
