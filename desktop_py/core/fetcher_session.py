@@ -9,6 +9,7 @@ from desktop_py.core.fetcher_support import (
     ensure_account_session_available,
     is_login_timeout_page,
     normalize_profile_dir,
+    persist_storage_state,
     recover_login_timeout_page,
     safe_page_content,
 )
@@ -106,12 +107,22 @@ def _wait_for_login_success(
     datetime_cls,
     is_cancelled,
     wait_or_cancel_fn,
+    logger=None,
+    log_fn=None,
 ) -> None:
     deadline = datetime_cls.now().timestamp() + wait_seconds
     while datetime_cls.now().timestamp() < deadline:
         wait_or_cancel_fn(page, 2000, is_cancelled)
         if _has_backend_session(page):
-            context.storage_state(path=str(state_path), indexed_db=True)
+            persist_storage_state(
+                context,
+                str(state_path),
+                page=page,
+                logger=logger,
+                log_fn=log_fn,
+                wait_or_cancel_fn=wait_or_cancel_fn,
+                is_cancelled=is_cancelled,
+            )
             return
     raise FetchError("未在限定时间内检测到登录成功，已保留原登录态文件。")
 
@@ -150,6 +161,8 @@ def save_login_state_impl(
                     datetime_cls=datetime_cls,
                     is_cancelled=is_cancelled,
                     wait_or_cancel_fn=wait_or_cancel_fn,
+                    logger=logger,
+                    log_fn=log_fn,
                 )
             except FetchError as exc:
                 raise FetchError(f"账号 {account.name} {exc}") from exc
@@ -206,6 +219,8 @@ def save_login_state_with_profile_impl(
                     datetime_cls=datetime_cls,
                     is_cancelled=is_cancelled,
                     wait_or_cancel_fn=wait_or_cancel_fn,
+                    logger=logger,
+                    log_fn=log_fn,
                 )
             except FetchError as exc:
                 raise FetchError(f"账号 {account.name} {exc}") from exc
@@ -273,12 +288,14 @@ def renew_account_state_impl(
     account: AccountConfig,
     logger: callable | None = None,
     profile_dir: str = "",
+    headless: bool = True,
     *,
     sync_playwright_fn,
     path_exists_fn,
     validate_shared_browser_profile_dir_fn,
     create_browser_context_fn,
     wait_for_url_contains_fn,
+    wait_or_cancel_fn,
     close_page_fn,
     close_context_and_browser_fn,
     log_fn,
@@ -299,7 +316,7 @@ def renew_account_state_impl(
         return False
 
     with sync_playwright_fn() as playwright:
-        browser, context = create_browser_context_fn(playwright, account, True, normalized_profile_dir)
+        browser, context = create_browser_context_fn(playwright, account, headless, normalized_profile_dir)
         page = context.new_page()
         renewed = False
         try:
@@ -318,6 +335,10 @@ def renew_account_state_impl(
                 browser,
                 state_path=state_path if renewed else None,
                 persist_state=renewed,
+                page=page,
+                logger=logger,
+                log_fn=log_fn,
+                wait_or_cancel_fn=wait_or_cancel_fn,
             )
 
     log_fn(logger, f"账号 {account.name} 自动续期{'成功' if renewed else '失败'}。")

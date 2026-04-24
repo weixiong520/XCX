@@ -372,5 +372,6 @@ def fetch_switchable_accounts_impl(
                 browser,
                 state_path=state_path if normalized_profile_dir else None,
                 persist_state=bool(normalized_profile_dir),
+                page=page,
             )
     return names

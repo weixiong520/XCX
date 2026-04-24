@@ -5,7 +5,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from desktop_py.core.fetcher_support import FetchError
+from desktop_py.core.fetcher_support import FetchError, persist_storage_state
 
 
 @dataclass
@@ -41,7 +41,7 @@ def _close_runtime(runtime: GroupRuntime) -> None:
     runtime.busy = False
     try:
         if runtime.persist_state and runtime.state_path is not None:
-            runtime.context.storage_state(path=str(runtime.state_path), indexed_db=True)
+            persist_storage_state(runtime.context, str(runtime.state_path), page=runtime.page)
     except Exception as exc:
         close_errors.append(exc)
     try:

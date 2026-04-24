@@ -4,6 +4,7 @@ import json
 import re
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -44,6 +45,26 @@ PathExists = Callable[[Path], bool]
 CancelCheck = Callable[[], bool]
 ExtractCurrentAccountName = Callable[[Page], str]
 Logger = Callable[[str], None]
+STORAGE_STATE_RETRY_DELAYS_MS = (1000, 2000)
+STORAGE_STATE_SETTLE_MS = 1200
+
+
+@dataclass(frozen=True)
+class StorageStateSaveResult:
+    attempts: int
+    indexed_db: bool = True
+
+
+def _page_is_closed(page: Page | None) -> bool:
+    if page is None:
+        return True
+    is_closed = getattr(page, "is_closed", None)
+    if callable(is_closed):
+        try:
+            return bool(is_closed())
+        except Exception:
+            return True
+    return False
 
 
 def normalize_profile_dir(
@@ -162,6 +183,97 @@ def wait_or_cancel(page: Page, timeout_ms: int, is_cancelled: CancelCheck | None
     page.wait_for_timeout(timeout_ms)
     if is_cancelled is not None and is_cancelled():
         raise CancelledError("任务已取消")
+
+
+def _wait_or_sleep(
+    page: Page | None,
+    timeout_ms: int,
+    *,
+    wait_or_cancel_fn,
+    is_cancelled: CancelCheck | None = None,
+) -> None:
+    if _page_is_closed(page):
+        page = None
+    if page is not None:
+        if callable(getattr(page, "wait_for_timeout", None)):
+            wait_or_cancel_fn(page, timeout_ms, is_cancelled)
+        return
+    if is_cancelled is not None and is_cancelled():
+        raise CancelledError("任务已取消")
+    time.sleep(timeout_ms / 1000)
+    if is_cancelled is not None and is_cancelled():
+        raise CancelledError("任务已取消")
+
+
+def _wait_for_storage_state_ready(
+    page: Page | None,
+    *,
+    wait_or_cancel_fn,
+    is_cancelled: CancelCheck | None = None,
+    settle_ms: int = STORAGE_STATE_SETTLE_MS,
+) -> None:
+    if _page_is_closed(page):
+        return
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=1500)
+    except Exception:
+        pass
+    try:
+        page.wait_for_load_state("networkidle", timeout=1500)
+    except Exception:
+        pass
+    _wait_or_sleep(page, settle_ms, wait_or_cancel_fn=wait_or_cancel_fn, is_cancelled=is_cancelled)
+
+
+def _is_indexed_db_serialization_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "indexeddb" in message and (
+        "unable to serialize" in message or "internal error" in message or "storage_state" in message
+    )
+
+
+def persist_storage_state(
+    context: Any,
+    state_path: str,
+    *,
+    page: Page | None = None,
+    logger: Logger | None = None,
+    log_fn: Callable[[Logger | None, str], None] | None = None,
+    wait_or_cancel_fn=wait_or_cancel,
+    is_cancelled: CancelCheck | None = None,
+    retry_delays_ms: tuple[int, ...] = STORAGE_STATE_RETRY_DELAYS_MS,
+) -> StorageStateSaveResult:
+    target = Path(state_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if _page_is_closed(page):
+        page = None
+    total_attempts = len(retry_delays_ms) + 1
+    last_error: Exception | None = None
+
+    for attempt in range(1, total_attempts + 1):
+        if attempt > 1:
+            delay_ms = retry_delays_ms[attempt - 2]
+            if log_fn is not None:
+                log_fn(
+                    logger,
+                    f"登录态保存重试 {attempt}/{total_attempts}：IndexedDB 序列化失败，等待 {delay_ms} ms 后重试。",
+                )
+            _wait_or_sleep(page, delay_ms, wait_or_cancel_fn=wait_or_cancel_fn, is_cancelled=is_cancelled)
+
+        _wait_for_storage_state_ready(page, wait_or_cancel_fn=wait_or_cancel_fn, is_cancelled=is_cancelled)
+        try:
+            context.storage_state(path=str(target), indexed_db=True)
+            if attempt > 1 and log_fn is not None:
+                log_fn(logger, f"登录态保存已在第 {attempt} 次尝试后成功。")
+            return StorageStateSaveResult(attempts=attempt)
+        except Exception as exc:
+            last_error = exc
+            if attempt >= total_attempts or not _is_indexed_db_serialization_error(exc):
+                raise
+
+    if last_error is not None:
+        raise last_error
+    return StorageStateSaveResult(attempts=total_attempts)
 
 
 def _page_contains_text(page: Page, text: str, *, safe_page_content_fn) -> bool:
@@ -406,11 +518,24 @@ def _close_context_and_browser(
     browser: Any,
     state_path: Path | None = None,
     persist_state: bool = False,
+    page: Page | None = None,
+    logger: Logger | None = None,
+    log_fn: Callable[[Logger | None, str], None] | None = None,
+    wait_or_cancel_fn=wait_or_cancel,
+    is_cancelled: CancelCheck | None = None,
 ) -> None:
     context_error: Exception | None = None
     if persist_state and state_path is not None:
         try:
-            context.storage_state(path=str(state_path), indexed_db=True)
+            persist_storage_state(
+                context,
+                str(state_path),
+                page=page,
+                logger=logger,
+                log_fn=log_fn,
+                wait_or_cancel_fn=wait_or_cancel_fn,
+                is_cancelled=is_cancelled,
+            )
         except Exception as exc:
             context_error = exc
 

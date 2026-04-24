@@ -537,7 +537,12 @@ class MainWindow(QMainWindow):
     def _run_auto_renew(self) -> None:
         run_auto_renew_impl(
             self,
-            renew_account_state_fn=lambda account, log, profile_dir: renew_account_state(account, log, profile_dir),
+            renew_account_state_fn=lambda account, log, profile_dir, headless: renew_account_state(
+                account,
+                log,
+                profile_dir,
+                headless,
+            ),
         )
 
     def _mark_auto_renew_result(self, account: AccountConfig, valid: bool) -> None:

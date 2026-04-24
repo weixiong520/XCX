@@ -2234,6 +2234,52 @@ class FetcherTestCase(unittest.TestCase):
         self.assertIn("storage:storage\\shared.json:True", calls)
         self.assertEqual(calls[-2:], ["storage:storage\\shared.json:True", "context"])
 
+    def test_renew_account_state_passes_headless_flag_to_browser_context(self):
+        observed: list[object] = []
+
+        class FakePageForRenew:
+            url = "https://mp.weixin.qq.com/wxamp/index/index?token=1"
+
+            def goto(self, _url, wait_until=None, timeout=None):
+                return None
+
+            def close(self):
+                return None
+
+        class FakeContextForRenew:
+            def __init__(self):
+                self.page = FakePageForRenew()
+
+            def new_page(self):
+                return self.page
+
+            def storage_state(self, path=None, indexed_db=False):
+                return None
+
+            def close(self):
+                return None
+
+        def fake_create_browser_context(_playwright, account, headless, profile_dir):
+            observed.extend([account.name, headless, profile_dir])
+            return None, FakeContextForRenew()
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch("desktop_py.core.fetcher.create_browser_context", side_effect=fake_create_browser_context),
+            patch("desktop_py.core.fetcher.validate_shared_browser_profile_dir", return_value="C:/profile"),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            valid = renew_account_state(
+                AccountConfig(name="accountA", state_path="storage/shared.json"),
+                profile_dir="C:/profile",
+                headless=False,
+            )
+
+        self.assertTrue(valid)
+        self.assertEqual(observed, ["accountA", False, "C:/profile"])
+
     def test_renew_account_state_persists_regular_state_file(self):
         calls: list[str] = []
 
@@ -2719,6 +2765,61 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertTrue(valid)
         self.assertEqual(call_count, 1)
+
+
+    def test_renew_account_state_persists_after_page_already_closed(self):
+        calls: list[str] = []
+
+        class FakePageForRenew:
+            def __init__(self):
+                self.url = "https://mp.weixin.qq.com/wxamp/index/index?token=1"
+                self.closed = False
+
+            def goto(self, _url, wait_until=None, timeout=None):
+                calls.append("goto")
+
+            def close(self):
+                self.closed = True
+                calls.append("page")
+
+            def is_closed(self):
+                return self.closed
+
+            def wait_for_timeout(self, timeout):
+                calls.append(f"wait:{timeout}")
+
+        class FakeContextForRenew:
+            def __init__(self):
+                self.page = FakePageForRenew()
+
+            def new_page(self):
+                return self.page
+
+            def storage_state(self, path=None, indexed_db=False):
+                calls.append(f"storage:{path}:{indexed_db}")
+
+            def close(self):
+                calls.append("context")
+
+        fake_browser = type("FakeBrowser", (), {"close": lambda self: calls.append("browser")})()
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                return_value=(fake_browser, FakeContextForRenew()),
+            ),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=True),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            valid = renew_account_state(AccountConfig(name="accountA", state_path="storage/shared.json"), profile_dir="")
+
+        self.assertTrue(valid)
+        self.assertIn("page", calls)
+        self.assertIn("storage:storage\\shared.json:True", calls)
+        self.assertFalse(any(call.startswith("wait:") for call in calls))
 
 
 if __name__ == "__main__":

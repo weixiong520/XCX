@@ -453,17 +453,24 @@ def validate_account_state(account: AccountConfig, logger: callable | None = Non
     )
 
 
-def renew_account_state(account: AccountConfig, logger: callable | None = None, profile_dir: str = "") -> bool:
+def renew_account_state(
+    account: AccountConfig,
+    logger: callable | None = None,
+    profile_dir: str = "",
+    headless: bool = True,
+) -> bool:
     return _run_blocking_fetch_call(
         lambda: renew_account_state_impl(
             account,
             logger=logger,
             profile_dir=profile_dir,
+            headless=headless,
             sync_playwright_fn=sync_playwright,
             path_exists_fn=Path.exists,
             validate_shared_browser_profile_dir_fn=validate_shared_browser_profile_dir,
             create_browser_context_fn=create_browser_context,
             wait_for_url_contains_fn=wait_for_url_contains,
+            wait_or_cancel_fn=wait_or_cancel,
             close_page_fn=_close_page,
             close_context_and_browser_fn=_close_context_and_browser,
             log_fn=_log,

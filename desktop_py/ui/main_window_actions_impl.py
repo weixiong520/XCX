@@ -391,7 +391,12 @@ def renew_selected(window, *, renew_account_state_fn) -> None:
         window._show_info("提示", "导入账号不能登录续期，请选择主账号。")
         return
     window._run_thread(
-        lambda log: renew_account_state_fn(account, log, window.settings.browser_profile_dir),
+        lambda log: renew_account_state_fn(
+            account,
+            log,
+            window.settings.browser_profile_dir,
+            window.settings.headless_fetch,
+        ),
         on_success=lambda ok: window._mark_auto_renew_result(account, bool(ok)),
     )
 
@@ -508,7 +513,12 @@ def run_auto_renew(window, *, renew_account_state_fn) -> None:
         window.append_log("自动续期已跳过：未配置主账号。")
         return
     window._run_thread(
-        lambda log: renew_account_state_fn(account, log, window.settings.browser_profile_dir),
+        lambda log: renew_account_state_fn(
+            account,
+            log,
+            window.settings.browser_profile_dir,
+            window.settings.headless_fetch,
+        ),
         on_success=lambda ok: window._mark_auto_renew_result(account, bool(ok)),
         update_status=False,
     )

@@ -1014,6 +1014,45 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertTrue(job(lambda _message: None))
         self.assertEqual(mock_renew.call_args.args[0].name, "主账号")
 
+    def test_run_auto_renew_passes_headless_fetch_setting(self):
+        with patch.dict(os.environ, {"QT_QPA_PLATFORM": "windows"}):
+            window = MainWindow()
+            self.addCleanup(window.close)
+            window.settings.headless_fetch = False
+            window.accounts = [
+                AccountConfig(name="entry", state_path="storage/shared.json", is_entry_account=True),
+            ]
+
+            with patch.object(window, "_run_thread") as mock_run_thread:
+                window._run_auto_renew()
+
+            job = mock_run_thread.call_args.args[0]
+            with patch("desktop_py.ui.main_window.renew_account_state", return_value=True) as mock_renew:
+                self.assertTrue(job(lambda _message: None))
+
+            self.assertEqual(mock_renew.call_args.args[0].name, "entry")
+            self.assertFalse(mock_renew.call_args.args[3])
+
+    def test_renew_selected_passes_headless_fetch_setting(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.settings.headless_fetch = False
+        window.accounts = [
+            AccountConfig(name="entry", state_path="storage/shared.json", is_entry_account=True),
+        ]
+        window.refresh_table()
+
+        with (
+            patch("desktop_py.ui.main_window.renew_account_state", return_value=True) as mock_renew,
+            patch.object(window, "_run_thread") as mock_run_thread,
+        ):
+            window.renew_selected()
+
+        job = mock_run_thread.call_args.args[0]
+        self.assertTrue(job(lambda _message: None))
+        self.assertEqual(mock_renew.call_args.args[0].name, "entry")
+        self.assertFalse(mock_renew.call_args.args[3])
+
     def test_login_renew_and_validate_buttons_keep_left_to_right_order(self):
         window = MainWindow()
         self.addCleanup(window.close)
