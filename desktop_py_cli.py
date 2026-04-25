@@ -40,7 +40,7 @@ def main() -> int:
         changed = False
         for account in enabled_imported_accounts(accounts):
             try:
-                result = fetch_account(account, 0, settings.headless_fetch, print)
+                result = fetch_account(account, 0, settings.headless_fetch, print, settings.browser_profile_dir)
                 results.append(result.to_dict())
                 if refresh_account_feedback_url(account, result.page_url):
                     changed = True
@@ -59,7 +59,7 @@ def main() -> int:
         changed = False
         for account in enabled_imported_accounts(accounts):
             try:
-                result = fetch_account(account, 0, settings.headless_fetch, print)
+                result = fetch_account(account, 0, settings.headless_fetch, print, settings.browser_profile_dir)
                 results.append(result)
                 if refresh_account_feedback_url(account, result.page_url):
                     changed = True

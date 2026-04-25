@@ -684,7 +684,7 @@ def clear_pushed_fetch_state(window, *, save_accounts_fn) -> None:
     for account in window.accounts:
         if account.is_entry_account or not account.enabled:
             continue
-        if account.last_status != "抓取成功" or not account.last_deadline.strip():
+        if account.last_status != "抓取成功":
             continue
         account.last_deadline = ""
         account.last_status = ""

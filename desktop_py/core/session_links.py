@@ -20,14 +20,18 @@ def build_feedback_url_from_token(token: str) -> str:
     value = token.strip()
     if not value:
         return ""
-    return GAME_FEEDBACK_BASE_URL + "?" + urlencode(
-        {
-            "action": "plugin_redirect",
-            "plugin_uin": "1010",
-            "selected": "2",
-            "token": value,
-            "lang": "zh_CN",
-        }
+    return (
+        GAME_FEEDBACK_BASE_URL
+        + "?"
+        + urlencode(
+            {
+                "action": "plugin_redirect",
+                "plugin_uin": "1010",
+                "selected": "2",
+                "token": value,
+                "lang": "zh_CN",
+            }
+        )
     )
 
 
@@ -73,9 +77,7 @@ def _preferred_group_feedback_url(
     candidates: list[AccountConfig] = []
     if preferred_account is not None and preferred_account.state_path == state_path:
         candidates.append(preferred_account)
-    candidates.extend(
-        account for account in group_accounts if account.is_entry_account and account not in candidates
-    )
+    candidates.extend(account for account in group_accounts if account.is_entry_account and account not in candidates)
     candidates.extend(account for account in group_accounts if account not in candidates)
     for account in candidates:
         feedback_url = canonical_feedback_url(account.feedback_url)

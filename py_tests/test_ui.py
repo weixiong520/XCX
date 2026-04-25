@@ -719,6 +719,15 @@ class UiSmokeTestCase(unittest.TestCase):
                 last_deadline="",
                 last_note="页面未出现业务 iframe",
             ),
+            AccountConfig(
+                name="导入账号D",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                enabled=True,
+                last_status="抓取成功",
+                last_deadline="",
+                last_note="通知中心未读消息 1 条：小程序微信认证年审通知",
+            ),
         ]
 
         with (
@@ -737,6 +746,9 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertEqual(accounts_by_name["导入账号B"].last_deadline, "2026-04-21 11:42:31")
         self.assertEqual(accounts_by_name["导入账号C"].last_status, "抓取失败")
         self.assertEqual(accounts_by_name["导入账号C"].last_note, "页面未出现业务 iframe")
+        self.assertEqual(accounts_by_name["导入账号D"].last_deadline, "")
+        self.assertEqual(accounts_by_name["导入账号D"].last_status, "")
+        self.assertEqual(accounts_by_name["导入账号D"].last_note, "")
         mock_save_accounts.assert_called_once_with(window.accounts)
         self.assertIn("已清理推送后的抓取状态", window.log_edit.toPlainText())
 
@@ -1257,9 +1269,7 @@ class UiSmokeTestCase(unittest.TestCase):
             page_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
         )
 
-        with patch("desktop_py.ui.main_window.save_accounts"), patch.object(
-            window, "_update_current_main_account"
-        ):
+        with patch("desktop_py.ui.main_window.save_accounts"), patch.object(window, "_update_current_main_account"):
             window._mark_fetch_result(window.accounts[1], result)
 
         self.assertEqual(

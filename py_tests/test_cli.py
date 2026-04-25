@@ -65,8 +65,34 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(calls, ["导入账号A"])
         self.assertEqual(json.loads(captured.getvalue())[0]["account_name"], "导入账号A")
-        self.assertEqual(accounts[1].feedback_url, "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=cli&lang=zh_CN")
+        self.assertEqual(
+            accounts[1].feedback_url,
+            "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=cli&lang=zh_CN",
+        )
         mock_save_accounts.assert_called_once_with(accounts)
+
+    def test_fetch_all_passes_shared_profile_dir_to_fetcher(self):
+        accounts = [
+            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True),
+        ]
+
+        with (
+            patch("desktop_py_cli.load_accounts", return_value=accounts),
+            patch(
+                "desktop_py_cli.load_settings",
+                return_value=AppSettings(headless_fetch=False, browser_profile_dir="C:/shared/profile"),
+            ),
+            patch(
+                "desktop_py_cli.fetch_account",
+                return_value=FetchResult(account_name="导入账号A", ok=True),
+            ) as mock_fetch,
+            patch("sys.argv", ["desktop_py_cli.py", "fetch-all"]),
+            redirect_stdout(io.StringIO()),
+        ):
+            result = desktop_py_cli.main()
+
+        self.assertEqual(result, 0)
+        mock_fetch.assert_called_once_with(accounts[0], 0, False, print, "C:/shared/profile")
 
     def test_notify_skips_entry_account(self):
         accounts = [
@@ -91,6 +117,33 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(calls, ["导入账号A"])
         mock_send.assert_called_once()
+
+    def test_notify_passes_shared_profile_dir_to_fetcher(self):
+        accounts = [
+            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True),
+        ]
+
+        with (
+            patch("desktop_py_cli.load_accounts", return_value=accounts),
+            patch(
+                "desktop_py_cli.load_settings",
+                return_value=AppSettings(
+                    headless_fetch=False,
+                    feishu_webhook="hook",
+                    browser_profile_dir="C:/shared/profile",
+                ),
+            ),
+            patch(
+                "desktop_py_cli.fetch_account",
+                return_value=FetchResult(account_name="导入账号A", ok=True),
+            ) as mock_fetch,
+            patch("desktop_py_cli.send_feishu_text"),
+            patch("sys.argv", ["desktop_py_cli.py", "notify"]),
+        ):
+            result = desktop_py_cli.main()
+
+        self.assertEqual(result, 0)
+        mock_fetch.assert_called_once_with(accounts[0], 0, False, print, "C:/shared/profile")
 
     def test_notify_continues_when_one_account_fetch_fails(self):
         accounts = [
