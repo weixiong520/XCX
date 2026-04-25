@@ -50,6 +50,29 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertIsNotNone(window.auto_fetch_push_switch)
         self.assertTrue(window.auto_fetch_push_switch.isChecked())
 
+    def test_initialize_window_state_normalizes_shared_feedback_url(self):
+        shared_feedback_url = "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=shared"
+        accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True, feedback_url=""),
+            AccountConfig(
+                name="导入账号A",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                feedback_url=shared_feedback_url,
+            ),
+        ]
+
+        with (
+            patch("desktop_py.ui.main_window.load_accounts", return_value=accounts),
+            patch("desktop_py.ui.main_window.load_settings", return_value=AppSettings()),
+            patch("desktop_py.ui.main_window.save_accounts") as mock_save_accounts,
+        ):
+            window = MainWindow()
+            self.addCleanup(window.close)
+
+        self.assertEqual(window.accounts[0].feedback_url, window.accounts[1].feedback_url)
+        mock_save_accounts.assert_called_once_with(window.accounts)
+
     def test_auto_validate_entry_account_skips_in_offscreen(self):
         window = MainWindow()
         self.addCleanup(window.close)
@@ -388,6 +411,23 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertEqual(account.last_note, "可继续导入账号或直接抓取")
         self.assertIn("登录态已保存完成", window.log_edit.toPlainText())
 
+    def test_mark_login_propagates_feedback_url_to_shared_accounts(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        account = AccountConfig(
+            name="入口账号",
+            state_path="storage/shared.json",
+            is_entry_account=True,
+            feedback_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+        )
+        imported = AccountConfig(name="导入账号", state_path="storage/shared.json", is_entry_account=False)
+        window.accounts = [account, imported]
+
+        with patch("desktop_py.ui.main_window.save_accounts"):
+            window._mark_login(account)
+
+        self.assertEqual(imported.feedback_url, account.feedback_url)
+
     def test_login_button_enabled_only_for_entry_account(self):
         window = MainWindow()
         self.addCleanup(window.close)
@@ -457,6 +497,54 @@ class UiSmokeTestCase(unittest.TestCase):
         mock_information.assert_called_once()
         self.assertIn("导入账号不允许编辑", mock_information.call_args.args[1])
 
+    def test_edit_account_state_path_switches_to_new_group_feedback_url(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        old_feedback_url = "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=old"
+        new_feedback_url = "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=new"
+        window.accounts = [
+            AccountConfig(
+                name="主账号",
+                state_path="storage/old.json",
+                is_entry_account=True,
+                feedback_url=old_feedback_url,
+            ),
+            AccountConfig(
+                name="导入账号A",
+                state_path="storage/new.json",
+                is_entry_account=False,
+                feedback_url=new_feedback_url,
+            ),
+        ]
+        window.refresh_table()
+
+        class FakeDialog:
+            DialogCode = AccountDialog.DialogCode
+
+            def __init__(self, account=None, parent=None):
+                self._account = account
+
+            def exec(self):
+                return self.DialogCode.Accepted
+
+            def build_account(self):
+                return AccountConfig(
+                    name="主账号",
+                    state_path="storage/new.json",
+                    is_entry_account=True,
+                    home_url="https://mp.weixin.qq.com/",
+                    enabled=True,
+                )
+
+        with (
+            patch("desktop_py.ui.main_window.AccountDialog", FakeDialog),
+            patch("desktop_py.ui.main_window.save_accounts"),
+        ):
+            window.edit_account()
+
+        self.assertEqual(window.accounts[0].state_path, "storage/new.json")
+        self.assertEqual(window.accounts[0].feedback_url, window.accounts[1].feedback_url)
+
     def test_imported_account_cannot_validate_login_state(self):
         window = MainWindow()
         self.addCleanup(window.close)
@@ -476,6 +564,23 @@ class UiSmokeTestCase(unittest.TestCase):
         mock_information.assert_called_once()
         self.assertIn("导入账号不能校验登录态", mock_information.call_args.args[1])
         mock_run_thread.assert_not_called()
+
+    def test_mark_validation_propagates_feedback_url_to_shared_accounts(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        account = AccountConfig(
+            name="主账号",
+            state_path="storage/shared.json",
+            is_entry_account=True,
+            feedback_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=validated",
+        )
+        imported = AccountConfig(name="导入账号", state_path="storage/shared.json", is_entry_account=False)
+        window.accounts = [account, imported]
+
+        with patch("desktop_py.ui.main_window.save_accounts"):
+            window._mark_validation(account, True)
+
+        self.assertEqual(imported.feedback_url, account.feedback_url)
 
     def test_imported_account_cannot_renew_login_state(self):
         window = MainWindow()
@@ -1033,6 +1138,33 @@ class UiSmokeTestCase(unittest.TestCase):
             self.assertEqual(mock_renew.call_args.args[0].name, "entry")
             self.assertFalse(mock_renew.call_args.args[3])
 
+    def test_run_auto_renew_inherits_feedback_url_from_shared_account(self):
+        with patch.dict(os.environ, {"QT_QPA_PLATFORM": "windows"}):
+            window = MainWindow()
+            self.addCleanup(window.close)
+            shared_feedback_url = "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=shared"
+            window.accounts = [
+                AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True, feedback_url=""),
+                AccountConfig(
+                    name="导入账号A",
+                    state_path="storage/shared.json",
+                    is_entry_account=False,
+                    feedback_url=shared_feedback_url,
+                ),
+            ]
+
+            with patch.object(window, "_run_thread") as mock_run_thread:
+                window._run_auto_renew()
+
+            job = mock_run_thread.call_args.args[0]
+            with patch("desktop_py.ui.main_window.renew_account_state", return_value=True) as mock_renew:
+                self.assertTrue(job(lambda _message: None))
+
+            self.assertEqual(
+                mock_renew.call_args.args[0].feedback_url,
+                "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=shared&lang=zh_CN",
+            )
+
     def test_renew_selected_passes_headless_fetch_setting(self):
         window = MainWindow()
         self.addCleanup(window.close)
@@ -1052,6 +1184,34 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertTrue(job(lambda _message: None))
         self.assertEqual(mock_renew.call_args.args[0].name, "entry")
         self.assertFalse(mock_renew.call_args.args[3])
+
+    def test_renew_selected_inherits_feedback_url_from_shared_account(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        shared_feedback_url = "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=shared"
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True, feedback_url=""),
+            AccountConfig(
+                name="导入账号A",
+                state_path="storage/shared.json",
+                is_entry_account=False,
+                feedback_url=shared_feedback_url,
+            ),
+        ]
+        window.refresh_table()
+
+        with (
+            patch("desktop_py.ui.main_window.renew_account_state", return_value=True) as mock_renew,
+            patch.object(window, "_run_thread") as mock_run_thread,
+        ):
+            window.renew_selected()
+
+        job = mock_run_thread.call_args.args[0]
+        self.assertTrue(job(lambda _message: None))
+        self.assertEqual(
+            mock_renew.call_args.args[0].feedback_url,
+            "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=shared&lang=zh_CN",
+        )
 
     def test_login_renew_and_validate_buttons_keep_left_to_right_order(self):
         window = MainWindow()
@@ -1083,6 +1243,30 @@ class UiSmokeTestCase(unittest.TestCase):
         window._update_action_buttons()
 
         self.assertTrue(window.stop_fetch_button.isEnabled())
+
+    def test_mark_fetch_result_propagates_feedback_url_to_shared_entry_account(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True, feedback_url=""),
+            AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, feedback_url=""),
+        ]
+        result = FetchResult(
+            account_name="导入账号A",
+            ok=True,
+            page_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+        )
+
+        with patch("desktop_py.ui.main_window.save_accounts"), patch.object(
+            window, "_update_current_main_account"
+        ):
+            window._mark_fetch_result(window.accounts[1], result)
+
+        self.assertEqual(
+            window.accounts[0].feedback_url,
+            "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=current&lang=zh_CN",
+        )
+        self.assertEqual(window.accounts[1].feedback_url, window.accounts[0].feedback_url)
 
     def test_stop_fetching_keeps_button_enabled_until_worker_exits(self):
         window = MainWindow()

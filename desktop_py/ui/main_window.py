@@ -266,6 +266,7 @@ class MainWindow(QMainWindow):
             ensure_runtime_dirs_fn=ensure_runtime_dirs,
             load_accounts_fn=load_accounts,
             load_settings_fn=load_settings,
+            save_accounts_fn=save_accounts,
             reset_current_main_account_name_fn=self._reset_current_main_account_name,
         )
         self._threads: list[TaskThread] = []

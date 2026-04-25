@@ -2088,6 +2088,66 @@ class FetcherTestCase(unittest.TestCase):
         self.assertEqual(calls, ["page", "context", "browser"])
         self.assertFalse(any(call.startswith("storage:") for call in calls))
 
+    def test_save_login_state_refreshes_feedback_url_from_backend_home_url(self):
+        class FakePageForLogin:
+            def __init__(self):
+                self.url = "https://mp.weixin.qq.com/"
+
+            def goto(self, _url, wait_until=None):
+                return None
+
+            def wait_for_timeout(self, _timeout):
+                self.url = "https://mp.weixin.qq.com/wxamp/index/index?token=321"
+
+            def close(self):
+                return None
+
+        class FakeContextForLogin:
+            def __init__(self):
+                self.page = FakePageForLogin()
+
+            def new_page(self):
+                return self.page
+
+            def storage_state(self, path=None, indexed_db=False):
+                return None
+
+            def close(self):
+                return None
+
+        class FakeBrowserForLogin:
+            def __init__(self):
+                self.context = FakeContextForLogin()
+
+            def new_context(self, viewport=None):
+                return self.context
+
+            def close(self):
+                return None
+
+        fake_browser = FakeBrowserForLogin()
+        fake_playwright = type(
+            "FakePlaywright",
+            (),
+            {"chromium": type("FakeChromium", (), {"launch": lambda self, headless=False: fake_browser})()},
+        )()
+        account = AccountConfig(name="账号A", state_path="storage/a.json")
+        timestamps = iter([100.0, 100.5])
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch("desktop_py.core.fetcher.datetime") as mock_datetime,
+        ):
+            mock_playwright.return_value.__enter__.return_value = fake_playwright
+            mock_datetime.now.return_value.timestamp.side_effect = lambda: next(timestamps)
+
+            save_login_state(account, 2)
+
+        self.assertEqual(
+            account.feedback_url,
+            "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=321&lang=zh_CN",
+        )
+
     def test_fetch_switchable_accounts_still_closes_browser_when_context_close_fails(self):
         calls: list[str] = []
 
@@ -2254,6 +2314,47 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertTrue(valid)
 
+    def test_validate_account_state_refreshes_feedback_url_from_backend_home_url(self):
+        account = AccountConfig(name="主账号", state_path="storage/shared.json")
+
+        class FakePageForValidation:
+            url = "https://mp.weixin.qq.com/wxamp/index/index?token=123"
+
+            def goto(self, _url, wait_until=None, timeout=None):
+                return None
+
+            def close(self):
+                return None
+
+        class FakeContextForValidation:
+            def __init__(self):
+                self.page = FakePageForValidation()
+
+            def new_page(self):
+                return self.page
+
+            def close(self):
+                return None
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                return_value=(None, FakeContextForValidation()),
+            ),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            valid = validate_account_state(account)
+
+        self.assertTrue(valid)
+        self.assertEqual(
+            account.feedback_url,
+            "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=123&lang=zh_CN",
+        )
+
     def test_renew_account_state_persists_shared_profile_state(self):
         calls: list[str] = []
 
@@ -2298,6 +2399,50 @@ class FetcherTestCase(unittest.TestCase):
         self.assertTrue(valid)
         self.assertIn("storage:storage\\shared.json:True", calls)
         self.assertEqual(calls[-2:], ["storage:storage\\shared.json:True", "context"])
+
+    def test_renew_account_state_refreshes_feedback_url_from_backend_home_url(self):
+        account = AccountConfig(name="主账号", state_path="storage/shared.json")
+
+        class FakePageForRenew:
+            url = "https://mp.weixin.qq.com/wxamp/index/index?token=456"
+
+            def goto(self, _url, wait_until=None, timeout=None):
+                return None
+
+            def close(self):
+                return None
+
+        class FakeContextForRenew:
+            def __init__(self):
+                self.page = FakePageForRenew()
+
+            def new_page(self):
+                return self.page
+
+            def storage_state(self, path=None, indexed_db=False):
+                return None
+
+            def close(self):
+                return None
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                return_value=(None, FakeContextForRenew()),
+            ),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            valid = renew_account_state(account)
+
+        self.assertTrue(valid)
+        self.assertEqual(
+            account.feedback_url,
+            "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=456&lang=zh_CN",
+        )
 
     def test_renew_account_state_passes_headless_flag_to_browser_context(self):
         observed: list[object] = []

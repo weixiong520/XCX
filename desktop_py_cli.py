@@ -6,7 +6,8 @@ import json
 from desktop_py.core.fetcher import fetch_account, save_login_state, save_login_state_with_profile
 from desktop_py.core.models import FetchResult
 from desktop_py.core.notifier import build_summary, send_feishu_text
-from desktop_py.core.store import load_accounts, load_settings
+from desktop_py.core.session_links import propagate_account_feedback_url, refresh_account_feedback_url
+from desktop_py.core.store import load_accounts, load_settings, save_accounts
 
 
 def enabled_imported_accounts(accounts: list[object]) -> list[object]:
@@ -30,27 +31,45 @@ def main() -> int:
             save_login_state_with_profile(account, settings.login_wait_seconds, settings.browser_profile_dir, print)
         else:
             save_login_state(account, settings.login_wait_seconds, print)
+        propagate_account_feedback_url(accounts, account)
+        save_accounts(accounts)
         return 0
 
     if args.command == "fetch-all":
         results = []
+        changed = False
         for account in enabled_imported_accounts(accounts):
             try:
-                results.append(fetch_account(account, 0, settings.headless_fetch, print).to_dict())
+                result = fetch_account(account, 0, settings.headless_fetch, print)
+                results.append(result.to_dict())
+                if refresh_account_feedback_url(account, result.page_url):
+                    changed = True
+                if propagate_account_feedback_url(accounts, account):
+                    changed = True
             except Exception as exc:
                 results.append({"account_name": account.name, "ok": False, "note": str(exc)})
+        if changed:
+            save_accounts(accounts)
         print(json.dumps(results, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "notify":
         results: list[FetchResult] = []
         failed_accounts: list[str] = []
+        changed = False
         for account in enabled_imported_accounts(accounts):
             try:
-                results.append(fetch_account(account, 0, settings.headless_fetch, print))
+                result = fetch_account(account, 0, settings.headless_fetch, print)
+                results.append(result)
+                if refresh_account_feedback_url(account, result.page_url):
+                    changed = True
+                if propagate_account_feedback_url(accounts, account):
+                    changed = True
             except Exception as exc:
                 failed_accounts.append(f"{account.name}：{exc}")
                 results.append(FetchResult(account_name=account.name, ok=False, note=str(exc)))
+        if changed:
+            save_accounts(accounts)
 
         summary = build_summary(results)
         send_feishu_text(settings.feishu_webhook, summary)

@@ -16,8 +16,16 @@ class CliTestCase(unittest.TestCase):
         with (
             patch("desktop_py_cli.load_accounts", return_value=[account]),
             patch("desktop_py_cli.load_settings", return_value=settings),
-            patch("desktop_py_cli.save_login_state_with_profile") as mock_login_with_profile,
+            patch(
+                "desktop_py_cli.save_login_state_with_profile",
+                side_effect=lambda current_account, *_args: setattr(
+                    current_account,
+                    "feedback_url",
+                    "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=shared",
+                ),
+            ) as mock_login_with_profile,
             patch("desktop_py_cli.save_login_state") as mock_login,
+            patch("desktop_py_cli.save_accounts") as mock_save_accounts,
             patch("sys.argv", ["desktop_py_cli.py", "login", "--account", "主账号"]),
         ):
             result = desktop_py_cli.main()
@@ -25,6 +33,7 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result, 0)
         mock_login_with_profile.assert_called_once_with(account, 45, "C:/shared/profile", print)
         mock_login.assert_not_called()
+        mock_save_accounts.assert_called_once()
 
     def test_fetch_all_skips_entry_account(self):
         accounts = [
@@ -37,12 +46,17 @@ class CliTestCase(unittest.TestCase):
 
         def fake_fetch(account, *_args, **_kwargs):
             calls.append(account.name)
-            return FetchResult(account_name=account.name, ok=True)
+            return FetchResult(
+                account_name=account.name,
+                ok=True,
+                page_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=cli",
+            )
 
         with (
             patch("desktop_py_cli.load_accounts", return_value=accounts),
             patch("desktop_py_cli.load_settings", return_value=AppSettings(headless_fetch=True)),
             patch("desktop_py_cli.fetch_account", side_effect=fake_fetch),
+            patch("desktop_py_cli.save_accounts") as mock_save_accounts,
             patch("sys.argv", ["desktop_py_cli.py", "fetch-all"]),
             redirect_stdout(captured),
         ):
@@ -51,6 +65,8 @@ class CliTestCase(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(calls, ["导入账号A"])
         self.assertEqual(json.loads(captured.getvalue())[0]["account_name"], "导入账号A")
+        self.assertEqual(accounts[1].feedback_url, "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=cli&lang=zh_CN")
+        mock_save_accounts.assert_called_once_with(accounts)
 
     def test_notify_skips_entry_account(self):
         accounts = [

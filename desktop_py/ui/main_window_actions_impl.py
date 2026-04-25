@@ -3,6 +3,12 @@ from __future__ import annotations
 import os
 import random
 
+from desktop_py.core.session_links import (
+    normalize_group_feedback_urls,
+    propagate_account_feedback_url,
+    sync_account_feedback_url,
+)
+
 
 def initialize_window_state(
     window,
@@ -10,10 +16,13 @@ def initialize_window_state(
     ensure_runtime_dirs_fn,
     load_accounts_fn,
     load_settings_fn,
+    save_accounts_fn,
     reset_current_main_account_name_fn,
 ) -> None:
     ensure_runtime_dirs_fn()
     window.accounts = load_accounts_fn()
+    if normalize_group_feedback_urls(window.accounts):
+        save_accounts_fn(window.accounts)
     window.settings = load_settings_fn()
     reset_current_main_account_name_fn()
 
@@ -31,6 +40,7 @@ def auto_validate_entry_account(window, *, os_module, validate_account_state_fn)
     account = entry_account(window)
     if account is None:
         return
+    sync_account_feedback_url(window.accounts, account)
     account.last_status = "检测中"
     account.last_note = ""
     window.refresh_table()
@@ -200,16 +210,9 @@ def add_account(window, *, account_dialog_cls, default_state_path_fn, save_accou
         return
     if not account.state_path:
         account.state_path = default_state_path_fn(window.accounts)
-    if not account.feedback_url:
-        account.feedback_url = next(
-            (
-                item.feedback_url
-                for item in window.accounts
-                if item.state_path == account.state_path and item.feedback_url
-            ),
-            "",
-        )
     window.accounts.append(account)
+    sync_account_feedback_url(window.accounts, account)
+    propagate_account_feedback_url(window.accounts, account)
     save_accounts_fn(window.accounts)
     window.refresh_table()
     window.append_log(f"已新增账号：{account.name}，登录态文件：{account.state_path}")
@@ -236,16 +239,21 @@ def edit_account(window, *, account_dialog_cls, default_state_path_fn, save_acco
     if duplicate:
         window._show_warning("提示", f"账号“{updated.name}”已存在。")
         return
+    original_state_path = account.state_path
     if not updated.state_path:
         updated.state_path = account.state_path or default_state_path_fn(window.accounts)
-    if not updated.feedback_url:
+    if updated.state_path == original_state_path:
         updated.feedback_url = account.feedback_url
+    else:
+        updated.feedback_url = ""
     updated.last_login_at = account.last_login_at
     updated.last_fetch_at = account.last_fetch_at
     updated.last_deadline = account.last_deadline
     updated.last_status = account.last_status
     updated.last_note = account.last_note
     window.accounts[window.selected_index()] = updated
+    sync_account_feedback_url(window.accounts, updated)
+    propagate_account_feedback_url(window.accounts, updated)
     save_accounts_fn(window.accounts)
     window.refresh_table()
     window.append_log(f"已更新账号：{updated.name}")
@@ -259,6 +267,7 @@ def import_accounts(window, *, fetch_switchable_accounts_fn) -> None:
     if not base_account.is_entry_account:
         window._show_info("提示", "只有主账号可以导入账号列表。")
         return
+    sync_account_feedback_url(window.accounts, base_account)
 
     window._run_thread(
         lambda log: fetch_switchable_accounts_fn(
@@ -281,6 +290,7 @@ def merge_imported_accounts(
     save_accounts_fn,
 ) -> None:
     existing = {account.name for account in window.accounts}
+    sync_account_feedback_url(window.accounts, base_account)
     imported = 0
     for name in names:
         if name in blocked_account_names or name in existing:
@@ -298,6 +308,7 @@ def merge_imported_accounts(
         existing.add(name)
         imported += 1
 
+    propagate_account_feedback_url(window.accounts, base_account)
     save_accounts_fn(window.accounts)
     window.refresh_table()
     window.append_log(f"已导入 {imported} 个新账号。")
@@ -350,6 +361,7 @@ def mark_login(window, account, *, datetime_cls, save_accounts_fn) -> None:
     account.last_login_at = datetime_cls.now().strftime("%Y-%m-%d %H:%M:%S")
     account.last_status = "已保存登录态"
     account.last_note = "可继续导入账号或直接抓取"
+    propagate_account_feedback_url(window.accounts, account)
     save_accounts_fn(window.accounts)
     window.refresh_table()
     window.append_log(f"账号 {account.name} 的登录态已保存完成。")
@@ -376,6 +388,7 @@ def validate_selected(window, *, validate_account_state_fn) -> None:
     if not account.is_entry_account:
         window._show_info("提示", "导入账号不能校验登录态，请选择主账号。")
         return
+    sync_account_feedback_url(window.accounts, account)
     window._run_thread(
         lambda log: validate_account_state_fn(account, log, window.settings.browser_profile_dir),
         on_success=lambda ok: window._mark_validation(account, bool(ok)),
@@ -390,6 +403,7 @@ def renew_selected(window, *, renew_account_state_fn) -> None:
     if not account.is_entry_account:
         window._show_info("提示", "导入账号不能登录续期，请选择主账号。")
         return
+    sync_account_feedback_url(window.accounts, account)
     window._run_thread(
         lambda log: renew_account_state_fn(
             account,
@@ -404,6 +418,7 @@ def renew_selected(window, *, renew_account_state_fn) -> None:
 def mark_validation(window, account, valid: bool, *, save_accounts_fn) -> None:
     account.last_status = "登录有效" if valid else "登录失效"
     account.last_note = "可直接抓取" if valid else "请重新保存登录态"
+    propagate_account_feedback_url(window.accounts, account)
     save_accounts_fn(window.accounts)
     window.refresh_table()
 
@@ -512,6 +527,7 @@ def run_auto_renew(window, *, renew_account_state_fn) -> None:
     if account is None:
         window.append_log("自动续期已跳过：未配置主账号。")
         return
+    sync_account_feedback_url(window.accounts, account)
     window._run_thread(
         lambda log: renew_account_state_fn(
             account,
@@ -589,6 +605,7 @@ def mark_fetch_progress(window, result) -> None:
 
 def mark_fetch_result(window, account, result, *, apply_fetch_result_fn, save_accounts_fn) -> None:
     current_main_account_name = apply_fetch_result_fn(account, result)
+    propagate_account_feedback_url(window.accounts, account)
     window.refresh_table()
     try:
         save_accounts_fn(window.accounts)
@@ -604,6 +621,8 @@ def mark_fetch_result(window, account, result, *, apply_fetch_result_fn, save_ac
 
 def mark_batch_results(window, results: list, *, apply_batch_fetch_results_fn, save_accounts_fn) -> None:
     latest_actual_account_name = apply_batch_fetch_results_fn(window.accounts, results)
+    for account in window.accounts:
+        propagate_account_feedback_url(window.accounts, account)
     window.refresh_table()
     try:
         save_accounts_fn(window.accounts)

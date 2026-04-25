@@ -7,12 +7,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Page, Response
 
 from desktop_py.core.models import AccountConfig
 from desktop_py.core.parser import convert_timestamp
+from desktop_py.core.session_links import canonical_feedback_url
 from desktop_py.core.store import validate_shared_browser_profile_dir
 
 
@@ -477,20 +478,10 @@ def _capture_response_payload(response: Response) -> Any | None:
 
 
 def build_feedback_url(page_url: str) -> str:
-    parsed = urlparse(page_url)
-    query = parse_qs(parsed.query)
-    token = (query.get("token") or [""])[0]
-    if not token:
+    feedback_url = canonical_feedback_url(page_url)
+    if not feedback_url:
         raise FetchError("当前后台地址中未找到有效 token，无法自动构造反馈页链接。")
-    return "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?" + urlencode(
-        {
-            "action": "plugin_redirect",
-            "plugin_uin": "1010",
-            "selected": "2",
-            "token": token,
-            "lang": "zh_CN",
-        }
-    )
+    return feedback_url
 
 
 def create_browser_context(

@@ -14,6 +14,7 @@ from desktop_py.core.fetcher_support import (
     safe_page_content,
 )
 from desktop_py.core.models import AccountConfig
+from desktop_py.core.session_links import refresh_account_feedback_url
 
 BACKEND_SESSION_URL_KEYWORDS = ("token=", "/wxamp/index/index", "pluginRedirect/gameFeedback")
 BACKEND_SESSION_CONTENT_KEYWORDS = (
@@ -99,6 +100,7 @@ def _probe_account_session(page, account: AccountConfig, *, wait_for_url_contain
 
 
 def _wait_for_login_success(
+    account: AccountConfig,
     page,
     context,
     state_path: Path,
@@ -114,6 +116,7 @@ def _wait_for_login_success(
     while datetime_cls.now().timestamp() < deadline:
         wait_or_cancel_fn(page, 2000, is_cancelled)
         if _has_backend_session(page):
+            refresh_account_feedback_url(account, str(getattr(page, "url", "") or ""))
             persist_storage_state(
                 context,
                 str(state_path),
@@ -154,6 +157,7 @@ def save_login_state_impl(
 
             try:
                 _wait_for_login_success(
+                    account,
                     page,
                     context,
                     state_path,
@@ -212,6 +216,7 @@ def save_login_state_with_profile_impl(
 
             try:
                 _wait_for_login_success(
+                    account,
                     page,
                     context,
                     state_path,
@@ -269,6 +274,8 @@ def validate_account_state_impl(
                 wait_for_url_contains_fn=wait_for_url_contains_fn,
                 timeout_ms=10000,
             )
+            if valid:
+                refresh_account_feedback_url(account, str(getattr(page, "url", "") or ""))
         except PlaywrightTimeoutError:
             valid = False
         finally:
@@ -326,6 +333,8 @@ def renew_account_state_impl(
                 wait_for_url_contains_fn=wait_for_url_contains_fn,
                 timeout_ms=10000,
             )
+            if renewed:
+                refresh_account_feedback_url(account, str(getattr(page, "url", "") or ""))
         except PlaywrightTimeoutError:
             renewed = False
         finally:
