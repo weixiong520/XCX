@@ -21,7 +21,7 @@ class BuildInstallerScriptTestCase(unittest.TestCase):
     def test_build_script_requires_clean_mode(self):
         content = SCRIPT_PATH.read_text(encoding="utf-8")
 
-        self.assertIn('throw "Only clean installer builds are supported. Pass -Clean."', content)
+        self.assertIn('throw "当前仅支持基于干净源目录构建安装包，请传入 -Clean。"', content)
 
     def test_build_script_supports_offline_runtime_mode(self):
         content = SCRIPT_PATH.read_text(encoding="utf-8")
