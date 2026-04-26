@@ -44,19 +44,25 @@ def _close_runtime(runtime: GroupRuntime) -> None:
             persist_storage_state(runtime.context, str(runtime.state_path), page=runtime.page)
     except Exception as exc:
         close_errors.append(exc)
-    try:
-        runtime.page.close()
-    except Exception as exc:
-        close_errors.append(exc)
-    try:
-        runtime.context.close()
-    except Exception as exc:
-        close_errors.append(exc)
-    if runtime.browser is not None:
+    page_close = getattr(runtime.page, "close", None)
+    if callable(page_close):
         try:
-            runtime.browser.close()
+            page_close()
         except Exception as exc:
             close_errors.append(exc)
+    context_close = getattr(runtime.context, "close", None)
+    if callable(context_close):
+        try:
+            context_close()
+        except Exception as exc:
+            close_errors.append(exc)
+    if runtime.browser is not None:
+        browser_close = getattr(runtime.browser, "close", None)
+        if callable(browser_close):
+            try:
+                browser_close()
+            except Exception as exc:
+                close_errors.append(exc)
     try:
         runtime.sync_manager.__exit__(None, None, None)
     except Exception as exc:

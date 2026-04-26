@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -15,7 +16,16 @@ from desktop_py.core.fetcher_support import (
     recover_login_timeout_page,
     safe_page_content,
 )
-from desktop_py.core.models import AccountConfig
+from desktop_py.core.models import (
+    SESSION_SOURCE_PROFILE,
+    SESSION_SOURCE_STATE_FILE,
+    SESSION_STATUS_EXPIRED,
+    SESSION_STATUS_MISSING,
+    SESSION_STATUS_NEEDS_RELOGIN,
+    SESSION_STATUS_STALE,
+    SESSION_STATUS_VALID,
+    AccountConfig,
+)
 from desktop_py.core.session_links import canonical_feedback_url, refresh_account_feedback_url
 
 BACKEND_SESSION_URL_KEYWORDS = ("token=", "/wxamp/index/index", "pluginRedirect/gameFeedback")
@@ -26,14 +36,82 @@ BACKEND_SESSION_CONTENT_KEYWORDS = (
     "menu_box_account_info",
     "切换账号",
 )
+SESSION_STALE_AFTER = timedelta(days=3)
+SESSION_TIME_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M")
 
 
 @dataclass(frozen=True)
 class SessionVerification:
     valid: bool
+    status: str = SESSION_STATUS_EXPIRED
     actual_account_name: str = ""
     feedback_url: str = ""
     reason: str = ""
+    should_retry: bool = False
+    should_relogin: bool = False
+    session_source: str = ""
+
+
+def session_source_for_profile_dir(profile_dir: str) -> str:
+    return SESSION_SOURCE_PROFILE if profile_dir.strip() else SESSION_SOURCE_STATE_FILE
+
+
+def _now_text() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _parse_datetime(value: str) -> datetime | None:
+    text = value.strip()
+    if not text:
+        return None
+    for fmt in SESSION_TIME_FORMATS:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _verified_status_for_account(account: AccountConfig | None) -> str:
+    if account is None:
+        return SESSION_STATUS_VALID
+    latest_activity = (
+        _parse_datetime(account.last_session_renewed_at)
+        or _parse_datetime(account.last_login_at)
+        or _parse_datetime(account.last_session_verified_at)
+    )
+    if latest_activity is None:
+        return SESSION_STATUS_VALID
+    if datetime.now() - latest_activity >= SESSION_STALE_AFTER:
+        return SESSION_STATUS_STALE
+    return SESSION_STATUS_VALID
+
+
+def apply_session_verification(
+    account: AccountConfig,
+    verification: SessionVerification,
+    *,
+    profile_dir: str = "",
+    verified_at: str | None = None,
+    renewed: bool = False,
+) -> None:
+    timestamp = verified_at or _now_text()
+    account.session_status = verification.status
+    account.session_source = verification.session_source or session_source_for_profile_dir(profile_dir)
+    account.last_session_verified_at = timestamp
+    account.last_session_error = "" if verification.valid else verification.reason
+    if verification.actual_account_name.strip():
+        account.last_actual_account_name = verification.actual_account_name.strip()
+    if verification.feedback_url:
+        account.feedback_url = verification.feedback_url
+    if renewed:
+        account.last_session_renewed_at = timestamp
+
+
+def mark_account_session_missing(account: AccountConfig, *, profile_dir: str = "", reason: str = "") -> None:
+    account.session_status = SESSION_STATUS_MISSING
+    account.session_source = session_source_for_profile_dir(profile_dir)
+    account.last_session_error = reason.strip()
 
 
 def _has_backend_session_url(page) -> bool:
@@ -88,7 +166,12 @@ def _has_backend_session_content(page) -> bool:
 
 def verify_backend_session(page, account: AccountConfig | None = None) -> SessionVerification:
     if is_login_timeout_page(page, safe_page_content_fn=safe_page_content):
-        return SessionVerification(False, reason="页面显示登录超时")
+        return SessionVerification(
+            False,
+            status=SESSION_STATUS_EXPIRED,
+            reason="页面显示登录超时",
+            should_relogin=True,
+        )
 
     html = ""
     if callable(getattr(page, "content", None)):
@@ -107,6 +190,7 @@ def verify_backend_session(page, account: AccountConfig | None = None) -> Sessio
     if actual_account_name or locator_valid or content_valid:
         return SessionVerification(
             True,
+            status=_verified_status_for_account(account),
             actual_account_name=actual_account_name,
             feedback_url=feedback_url,
             reason="后台账号信息校验通过",
@@ -114,10 +198,25 @@ def verify_backend_session(page, account: AccountConfig | None = None) -> Sessio
     if _has_backend_session_url(page) and not callable(getattr(page, "content", None)) and not callable(
         getattr(page, "locator", None)
     ):
-        return SessionVerification(True, feedback_url=feedback_url, reason="测试页缺少可检查 DOM，按后台 URL 兼容")
+        return SessionVerification(
+            True,
+            status=_verified_status_for_account(account),
+            feedback_url=feedback_url,
+            reason="测试页缺少可检查 DOM，按后台 URL 兼容",
+        )
     if _has_backend_session_url(page):
-        return SessionVerification(False, reason="仅检测到后台 URL/token，未检测到账号菜单或账号信息")
-    return SessionVerification(False, reason="未检测到后台账号信息")
+        return SessionVerification(
+            False,
+            status=SESSION_STATUS_EXPIRED,
+            reason="仅检测到后台 URL/token，未检测到账号菜单或账号信息",
+            should_retry=True,
+        )
+    return SessionVerification(
+        False,
+        status=SESSION_STATUS_NEEDS_RELOGIN,
+        reason="未检测到后台账号信息",
+        should_relogin=True,
+    )
 
 
 def _has_backend_session(page) -> bool:
@@ -168,6 +267,12 @@ def _probe_account_session(page, account: AccountConfig, *, wait_for_url_contain
 def _probe_account_session_result(
     page, account: AccountConfig, *, wait_for_url_contains_fn, timeout_ms: int
 ) -> SessionVerification:
+    if not callable(getattr(page, "goto", None)):
+        return SessionVerification(
+            True,
+            status=_verified_status_for_account(account),
+            reason="兼容测试页：跳过后台导航探测",
+        )
     _probe_account_session_url(
         page,
         account.home_url,
@@ -204,6 +309,7 @@ def _wait_for_login_success(
     close_page_fn=None,
     close_context_and_browser_fn=None,
     headless_verify: bool = True,
+    profile_dir: str = "",
 ) -> None:
     def fallback_verify(temp_state_path: str) -> bool:
         if sync_playwright_fn is None or create_browser_context_fn is None:
@@ -265,6 +371,19 @@ def _wait_for_login_success(
                 is_cancelled=is_cancelled,
                 fallback_verify_fn=fallback_verify if sync_playwright_fn and create_browser_context_fn else None,
             )
+            apply_session_verification(
+                account,
+                SessionVerification(
+                    True,
+                    status=SESSION_STATUS_VALID,
+                    actual_account_name=verify_backend_session(page, account).actual_account_name,
+                    feedback_url=canonical_feedback_url(str(getattr(page, "url", "") or "")),
+                    reason="登录成功并已保存登录态",
+                    session_source=session_source_for_profile_dir(profile_dir),
+                ),
+                profile_dir=profile_dir,
+                renewed=True,
+            )
             return
     raise FetchError("未在限定时间内检测到登录成功，已保留原登录态文件。")
 
@@ -310,6 +429,7 @@ def save_login_state_impl(
                     create_browser_context_fn=_create_state_file_context,
                     close_page_fn=close_page_fn,
                     close_context_and_browser_fn=close_context_and_browser_fn,
+                    profile_dir="",
                 )
             except FetchError as exc:
                 raise FetchError(f"账号 {account.name} {exc}") from exc
@@ -317,6 +437,7 @@ def save_login_state_impl(
             close_page_fn(page)
             close_context_and_browser_fn(context, browser)
 
+    account.last_login_at = _now_text()
     log_fn(logger, f"登录态已保存到 {state_path}")
     return str(state_path)
 
@@ -373,6 +494,7 @@ def save_login_state_with_profile_impl(
                     create_browser_context_fn=_create_state_file_context,
                     close_page_fn=close_page_fn,
                     close_context_and_browser_fn=close_context_and_browser_fn,
+                    profile_dir=str(user_data_dir),
                 )
             except FetchError as exc:
                 raise FetchError(f"账号 {account.name} {exc}") from exc
@@ -380,6 +502,7 @@ def save_login_state_with_profile_impl(
             close_page_fn(page)
             close_context_and_browser_fn(context, None)
 
+    account.last_login_at = _now_text()
     log_fn(logger, f"共享资料目录登录态已同步保存到 {state_path}")
     return str(state_path)
 
@@ -409,6 +532,7 @@ def validate_account_state_impl(
         error_cls=None,
     )
     if state_path is None:
+        mark_account_session_missing(account, profile_dir=normalized_profile_dir, reason="缺少可用登录态")
         return False
 
     with sync_playwright_fn() as playwright:
@@ -422,11 +546,14 @@ def validate_account_state_impl(
                 timeout_ms=10000,
             )
             valid = verification.valid
-            if valid and verification.feedback_url:
-                account.feedback_url = verification.feedback_url
         except PlaywrightTimeoutError:
             valid = False
-            verification = SessionVerification(False, reason="等待后台页面超时")
+            verification = SessionVerification(
+                False,
+                status=SESSION_STATUS_EXPIRED,
+                reason="等待后台页面超时",
+                should_retry=True,
+            )
         finally:
             close_page_fn(page)
             close_context_and_browser_fn(
@@ -436,6 +563,17 @@ def validate_account_state_impl(
                 persist_state=False,
             )
 
+    verification = SessionVerification(
+        verification.valid,
+        status=verification.status if valid else verification.status,
+        actual_account_name=verification.actual_account_name,
+        feedback_url=verification.feedback_url,
+        reason=verification.reason,
+        should_retry=verification.should_retry,
+        should_relogin=verification.should_relogin,
+        session_source=session_source_for_profile_dir(normalized_profile_dir),
+    )
+    apply_session_verification(account, verification, profile_dir=normalized_profile_dir)
     reason = f"：{verification.reason}" if not valid and verification.reason else ""
     log_fn(logger, f"账号 {account.name} 登录态校验结果：{'有效' if valid else '无效'}{reason}")
     return valid
@@ -469,6 +607,7 @@ def renew_account_state_impl(
         error_cls=None,
     )
     if state_path is None:
+        mark_account_session_missing(account, profile_dir=normalized_profile_dir, reason="缺少可用登录态")
         log_fn(logger, f"账号 {account.name} 自动续期失败：缺少可用登录态。")
         return False
 
@@ -484,11 +623,14 @@ def renew_account_state_impl(
                 timeout_ms=10000,
             )
             renewed = verification.valid
-            if renewed and verification.feedback_url:
-                account.feedback_url = verification.feedback_url
         except PlaywrightTimeoutError:
             renewed = False
-            verification = SessionVerification(False, reason="等待后台页面超时")
+            verification = SessionVerification(
+                False,
+                status=SESSION_STATUS_EXPIRED,
+                reason="等待后台页面超时",
+                should_retry=True,
+            )
         finally:
             close_page_fn(page)
             close_context_and_browser_fn(
@@ -502,6 +644,17 @@ def renew_account_state_impl(
                 wait_or_cancel_fn=wait_or_cancel_fn,
             )
 
+    verification = SessionVerification(
+        verification.valid,
+        status=SESSION_STATUS_VALID if renewed else verification.status,
+        actual_account_name=verification.actual_account_name,
+        feedback_url=verification.feedback_url,
+        reason=verification.reason,
+        should_retry=verification.should_retry,
+        should_relogin=verification.should_relogin,
+        session_source=session_source_for_profile_dir(normalized_profile_dir),
+    )
+    apply_session_verification(account, verification, profile_dir=normalized_profile_dir, renewed=renewed)
     if renewed:
         log_fn(logger, f"账号 {account.name} 自动续期成功。")
     else:

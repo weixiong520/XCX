@@ -30,7 +30,6 @@ class StoreTestCase(unittest.TestCase):
         account = AccountConfig(name="测试账号", state_path="storage/test.json")
         self.assertEqual(account.to_dict()["name"], "测试账号")
         self.assertTrue(account.to_dict()["is_entry_account"])
-
     def test_load_settings_defaults_auto_fetch_push_when_missing(self):
         with TemporaryDirectory() as temp_dir:
             settings_path = Path(temp_dir) / "settings.json"
@@ -250,7 +249,6 @@ class StoreTestCase(unittest.TestCase):
 
                 target = output_root / "测试账号" / "payload.json"
                 self.assertIn('"ok": true', target.read_text(encoding="utf-8"))
-
 
 if __name__ == "__main__":
     unittest.main()

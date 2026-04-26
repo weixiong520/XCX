@@ -50,6 +50,15 @@ Logger = Callable[[str], None]
 WaitOrCancel = Callable[[Page, int, CancelCheck | None], None]
 STORAGE_STATE_RETRY_DELAYS_MS = (1000, 2000)
 STORAGE_STATE_SETTLE_MS = 1200
+TARGET_REFUND_RESPONSE_URL_KEYWORDS = (
+    "getuserrefundchecklist",
+    "checkuserrefundcheck",
+    "getpayorderlistforuserrefund",
+)
+TARGET_NOTIFICATION_RESPONSE_URL_KEYWORDS = (
+    "/wxamp/tools/wasysnotify",
+    "wasysnotify",
+)
 
 
 class SafePageContent(Protocol):
@@ -470,7 +479,19 @@ def classify_refund_response_type(response_url: str, body: Any) -> str:
     return "other"
 
 
+def _is_target_refund_response_url(response_url: str) -> bool:
+    url = response_url.strip().lower()
+    return any(keyword in url for keyword in TARGET_REFUND_RESPONSE_URL_KEYWORDS)
+
+
+def _is_target_notification_response_url(response_url: str) -> bool:
+    url = response_url.strip().lower()
+    return any(keyword in url for keyword in TARGET_NOTIFICATION_RESPONSE_URL_KEYWORDS)
+
+
 def _capture_response_payload(response: Response) -> Any | None:
+    if not (_is_target_refund_response_url(response.url) or _is_target_notification_response_url(response.url)):
+        return None
     content_type = (response.headers.get("content-type") or "").lower()
     if not any(keyword in content_type for keyword in ("json", "javascript", "text")):
         return None
@@ -489,6 +510,8 @@ def _capture_response_payload(response: Response) -> Any | None:
         body = text[:3000]
 
     response_type = classify_refund_response_type(response.url, body)
+    if response_type == "other" and _is_target_notification_response_url(response.url):
+        response_type = "notification"
     return {
         "url": response.url,
         "status": response.status,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from desktop_py.core.models import AccountConfig, FetchResult
+from desktop_py.core.models import SESSION_STATUS_VALID, AccountConfig, FetchResult
 
 
 def is_no_deadline_note(note: str) -> bool:
@@ -24,6 +24,11 @@ def apply_fetch_result(account: AccountConfig, result: FetchResult) -> str:
     actual_note = f"当前实际账号：{result.actual_account_name}" if result.actual_account_name else ""
     account.last_note = "；".join(item for item in [result.note, actual_note] if item)
     account.feedback_url = result.page_url
+    account.last_actual_account_name = result.actual_account_name or account.last_actual_account_name
+    account.last_session_verified_at = result.fetched_at
+    if result.ok:
+        account.session_status = SESSION_STATUS_VALID
+        account.last_session_error = ""
     return result.actual_account_name or account.name
 
 
@@ -41,6 +46,12 @@ def apply_batch_fetch_results(accounts: list[AccountConfig], results: list[Fetch
         account.last_note = "；".join(item for item in [result.note, actual_note] if item)
         if result.page_url:
             account.feedback_url = result.page_url
+        if result.actual_account_name:
+            account.last_actual_account_name = result.actual_account_name
+        account.last_session_verified_at = result.fetched_at
+        if result.ok:
+            account.session_status = SESSION_STATUS_VALID
+            account.last_session_error = ""
         if result.actual_account_name:
             latest_actual_account_name = result.actual_account_name
     return latest_actual_account_name

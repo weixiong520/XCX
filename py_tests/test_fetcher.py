@@ -851,7 +851,8 @@ class FetcherTestCase(unittest.TestCase):
 
     def test_capture_response_payload_keeps_json_body_for_fallback(self):
         response = FakeResponse(
-            '{"data":{"user_refund_check_list":[{"ctrl_info":{"appeal_deadline_time":"1776737974"}}]}}'
+            '{"data":{"user_refund_check_list":[{"ctrl_info":{"appeal_deadline_time":"1776737974"}}]}}',
+            url="https://mp.weixin.qq.com/wxamp/cgi/getuserrefundchecklist?token=1",
         )
 
         payload = _capture_response_payload(response)
@@ -871,6 +872,27 @@ class FetcherTestCase(unittest.TestCase):
         self.assertEqual(payload["response_type"], "list")
         self.assertIn("captured_at", payload)
         self.assertEqual(payload["token"], "")
+
+    def test_capture_response_payload_ignores_unrelated_response_url(self):
+        response = FakeResponse(
+            '{"ok":true}',
+            url="https://mp.weixin.qq.com/cgi-bin/home?t=home/index&lang=zh_CN",
+        )
+
+        payload = _capture_response_payload(response)
+
+        self.assertIsNone(payload)
+
+    def test_capture_response_payload_keeps_notification_center_response(self):
+        response = FakeResponse(
+            '{"list":[{"title":"小程序微信认证年审通知"}]}',
+            url="https://mp.weixin.qq.com/wxamp/tools/wasysnotify?action=list&token=1",
+        )
+
+        payload = _capture_response_payload(response)
+
+        self.assertEqual(payload["response_type"], "notification")
+        self.assertEqual(payload["body"]["list"][0]["title"], "小程序微信认证年审通知")
 
     def test_classify_refund_response_type_distinguishes_list_and_detail(self):
         self.assertEqual(
@@ -989,6 +1011,56 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertEqual([result.account_name for result in results], ["账号A", "账号B"])
         self.assertEqual(len(created_pages), 1)
+        self.assertTrue(all(page.closed for page in created_pages))
+
+    def test_fetch_accounts_batch_rebuilds_runtime_every_five_accounts(self):
+        accounts = [AccountConfig(name=f"账号{i}", state_path="storage/a.json", is_entry_account=False) for i in range(6)]
+        created_pages = []
+
+        class FakePageObject:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        class FakeContext:
+            def new_page(self):
+                page = FakePageObject()
+                created_pages.append(page)
+                return page
+
+            def close(self):
+                return None
+
+        fake_browser = type("FakeBrowser", (), {"close": lambda self: None})()
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch(
+                "desktop_py.core.fetcher.create_browser_context",
+                side_effect=[
+                    (fake_browser, FakeContext()),
+                    (fake_browser, FakeContext()),
+                ],
+            ) as mock_create_context,
+            patch(
+                "desktop_py.core.fetcher._fetch_account_in_page",
+                side_effect=lambda page, context, account, logger, profile_dir, is_cancelled=None: FetchResult(
+                    account_name=account.name,
+                    ok=True,
+                    actual_account_name=account.name,
+                ),
+            ),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            results = fetch_accounts_batch(accounts)
+
+        self.assertEqual([result.account_name for result in results], [account.name for account in accounts])
+        self.assertEqual(mock_create_context.call_count, 2)
+        self.assertEqual(len(created_pages), 2)
         self.assertTrue(all(page.closed for page in created_pages))
 
     def test_fetch_account_reuses_existing_group_runtime(self):

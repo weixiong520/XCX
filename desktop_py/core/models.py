@@ -3,6 +3,15 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 
+SESSION_STATUS_MISSING = "missing"
+SESSION_STATUS_VALID = "valid"
+SESSION_STATUS_STALE = "stale"
+SESSION_STATUS_EXPIRED = "expired"
+SESSION_STATUS_NEEDS_RELOGIN = "needs_relogin"
+
+SESSION_SOURCE_STATE_FILE = "state_file"
+SESSION_SOURCE_PROFILE = "profile"
+
 
 @dataclass
 class AccountConfig:
@@ -17,6 +26,12 @@ class AccountConfig:
     last_deadline: str = ""
     last_status: str = ""
     last_note: str = ""
+    session_status: str = SESSION_STATUS_MISSING
+    session_source: str = ""
+    last_session_verified_at: str = ""
+    last_session_renewed_at: str = ""
+    last_session_error: str = ""
+    last_actual_account_name: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)

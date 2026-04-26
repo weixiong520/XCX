@@ -133,8 +133,6 @@ def fetch_notifications(
             safe_page_content_fn=safe_page_content_fn,
             is_cancelled=is_cancelled,
         )
-        page_html = safe_page_content_fn(page)
-        write_account_output_text(account.name, "notification_page.html", page_html)
         items = collect_notification_items(page)
         notifications = filter_target_unread_notifications(items, account.name)
         write_account_output_json(account.name, "notifications.json", notifications)

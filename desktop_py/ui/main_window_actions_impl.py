@@ -162,7 +162,7 @@ def save_current_settings(
     app_settings_cls,
     validate_shared_browser_profile_dir_fn,
     save_settings_fn,
-) -> None:
+    ) -> None:
     try:
         browser_profile_dir = validate_shared_browser_profile_dir_fn(window.profile_dir_edit.text().strip())
         window.settings = app_settings_cls(
@@ -250,6 +250,12 @@ def edit_account(window, *, account_dialog_cls, default_state_path_fn, save_acco
     updated.last_deadline = account.last_deadline
     updated.last_status = account.last_status
     updated.last_note = account.last_note
+    updated.session_status = account.session_status
+    updated.session_source = account.session_source
+    updated.last_session_verified_at = account.last_session_verified_at
+    updated.last_session_renewed_at = account.last_session_renewed_at
+    updated.last_session_error = account.last_session_error
+    updated.last_actual_account_name = account.last_actual_account_name
     window.accounts[window.selected_index()] = updated
     sync_account_feedback_url(window.accounts, updated)
     propagate_account_feedback_url(window.accounts, updated)
@@ -356,6 +362,8 @@ def mark_login(window, account, *, datetime_cls, save_accounts_fn, close_all_gro
     account.last_login_at = datetime_cls.now().strftime("%Y-%m-%d %H:%M:%S")
     account.last_status = "已保存登录态"
     account.last_note = "可继续导入账号或直接抓取"
+    account.session_status = SESSION_STATUS_VALID
+    account.last_session_error = ""
     for item in window.accounts:
         if item is account:
             continue
@@ -417,7 +425,10 @@ def renew_selected(window, *, renew_account_state_fn) -> None:
 
 def mark_validation(window, account, valid: bool, *, save_accounts_fn) -> None:
     account.last_status = "登录有效" if valid else "登录失效"
-    account.last_note = "可直接抓取" if valid else "请重新保存登录态"
+    if valid:
+        account.last_note = "可直接抓取" if account.session_status != SESSION_STATUS_STALE else "登录态接近失效，建议优先续期"
+    else:
+        account.last_note = account.last_session_error or "请重新保存登录态"
     if valid:
         propagate_account_feedback_url(window.accounts, account)
     save_accounts_fn(window.accounts)
@@ -542,7 +553,7 @@ def run_auto_renew(window, *, renew_account_state_fn) -> None:
 
 def mark_auto_renew_result(window, account, valid: bool, *, save_accounts_fn) -> None:
     account.last_status = "登录有效" if valid else "登录失效"
-    account.last_note = "自动续期成功，可直接抓取" if valid else "自动续期失败，请重新保存登录态"
+    account.last_note = "自动续期成功，可直接抓取" if valid else (account.last_session_error or "自动续期失败，请重新保存登录态")
     save_accounts_fn(window.accounts)
     window.refresh_table()
 
