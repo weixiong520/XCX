@@ -3093,6 +3093,115 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertEqual(progress_calls, ["账号A"])
 
+    def test_fetch_accounts_batch_does_not_rebuild_runtime_after_last_fatal_error(self):
+        from desktop_py.core.fetcher_pipeline import fetch_accounts_batch_impl
+
+        accounts = [AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False)]
+        acquire_calls = 0
+        invalidated_messages: list[str] = []
+
+        class FakeRuntime:
+            def __init__(self):
+                self.page = object()
+                self.context = object()
+                self.valid = True
+                self.busy = True
+
+        def acquire_runtime(*_args, **_kwargs):
+            nonlocal acquire_calls
+            acquire_calls += 1
+            if acquire_calls > 1:
+                raise RuntimeError("不应为最后一个账号重建运行时")
+            return FakeRuntime()
+
+        def invalidate_runtime(runtime, message=""):
+            runtime.valid = False
+            runtime.busy = False
+            invalidated_messages.append(message)
+
+        def fetch_account_in_page(*_args, **_kwargs):
+            raise RuntimeError("target page, context or browser has been closed")
+
+        results = fetch_accounts_batch_impl(
+            accounts,
+            sync_playwright_fn=lambda: None,
+            path_exists_fn=lambda _path: True,
+            validate_shared_browser_profile_dir_fn=lambda value: value,
+            create_browser_context_fn=lambda *_args: (None, None),
+            validate_account_state_fn=lambda *_args, **_kwargs: True,
+            renew_account_state_fn=lambda *_args, **_kwargs: True,
+            fetch_account_in_page_fn=fetch_account_in_page,
+            acquire_group_runtime_fn=acquire_runtime,
+            release_group_runtime_fn=lambda _runtime: None,
+            invalidate_group_runtime_fn=invalidate_runtime,
+            update_runtime_current_account_name_fn=lambda _runtime, _name: None,
+            should_invalidate_runtime_fn=lambda _exc: True,
+        )
+
+        self.assertEqual(acquire_calls, 1)
+        self.assertEqual(len(invalidated_messages), 1)
+        self.assertEqual(len(results), 1)
+        self.assertFalse(results[0].ok)
+        self.assertEqual(results[0].account_name, "账号A")
+        self.assertIn("target page, context or browser has been closed", results[0].note)
+
+    def test_fetch_accounts_batch_rebuilds_runtime_after_non_last_fatal_error(self):
+        from desktop_py.core.fetcher_pipeline import fetch_accounts_batch_impl
+
+        accounts = [
+            AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False),
+            AccountConfig(name="账号B", state_path="storage/a.json", is_entry_account=False),
+        ]
+        acquire_calls = 0
+        invalidated_messages: list[str] = []
+
+        class FakeRuntime:
+            def __init__(self, runtime_id: int):
+                self.page = object()
+                self.context = object()
+                self.valid = True
+                self.busy = True
+                self.runtime_id = runtime_id
+
+        def acquire_runtime(*_args, **_kwargs):
+            nonlocal acquire_calls
+            acquire_calls += 1
+            return FakeRuntime(acquire_calls)
+
+        def invalidate_runtime(runtime, message=""):
+            runtime.valid = False
+            runtime.busy = False
+            invalidated_messages.append(message)
+
+        def fetch_account_in_page(_page, _context, account, *_args):
+            if account.name == "账号A":
+                raise RuntimeError("target page, context or browser has been closed")
+            return FetchResult(account_name=account.name, ok=True, actual_account_name=account.name)
+
+        results = fetch_accounts_batch_impl(
+            accounts,
+            sync_playwright_fn=lambda: None,
+            path_exists_fn=lambda _path: True,
+            validate_shared_browser_profile_dir_fn=lambda value: value,
+            create_browser_context_fn=lambda *_args: (None, None),
+            validate_account_state_fn=lambda *_args, **_kwargs: True,
+            renew_account_state_fn=lambda *_args, **_kwargs: True,
+            fetch_account_in_page_fn=fetch_account_in_page,
+            acquire_group_runtime_fn=acquire_runtime,
+            release_group_runtime_fn=lambda _runtime: None,
+            invalidate_group_runtime_fn=invalidate_runtime,
+            update_runtime_current_account_name_fn=lambda _runtime, _name: None,
+            should_invalidate_runtime_fn=lambda _exc: True,
+        )
+
+        self.assertEqual(acquire_calls, 2)
+        self.assertEqual(len(results), 2)
+        self.assertFalse(results[0].ok)
+        self.assertEqual(results[0].account_name, "账号A")
+        self.assertTrue(results[1].ok)
+        self.assertEqual(results[1].account_name, "账号B")
+        self.assertIn("target page, context or browser has been closed", invalidated_messages[0])
+
     def test_validate_account_state_runs_in_helper_thread_when_asyncio_loop_exists(self):
         account = AccountConfig(name="主账号", state_path="storage/shared.json")
 

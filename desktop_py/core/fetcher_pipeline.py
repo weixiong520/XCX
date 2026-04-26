@@ -416,6 +416,7 @@ def fetch_accounts_batch_impl(
             for index, account in enumerate(group_accounts):
                 if is_cancelled is not None and is_cancelled():
                     raise CancelledError("任务已取消")
+                has_next_account = index < len(group_accounts) - 1
                 try:
                     result = fetch_account_in_page_fn(
                         runtime.page,
@@ -433,16 +434,17 @@ def fetch_accounts_batch_impl(
                 except Exception as exc:
                     if should_invalidate_runtime_fn(exc):
                         invalidate_group_runtime_fn(runtime, str(exc))
-                        runtime = acquire_group_runtime_fn(
-                            primary_account,
-                            headless=headless,
-                            profile_dir=normalized_profile_dir,
-                            sync_playwright_fn=sync_playwright_fn,
-                            create_browser_context_fn=create_browser_context_fn,
-                            logger=logger,
-                            is_cancelled=is_cancelled,
-                        )
-                        processed_in_runtime = 0
+                        if has_next_account:
+                            runtime = acquire_group_runtime_fn(
+                                primary_account,
+                                headless=headless,
+                                profile_dir=normalized_profile_dir,
+                                sync_playwright_fn=sync_playwright_fn,
+                                create_browser_context_fn=create_browser_context_fn,
+                                logger=logger,
+                                is_cancelled=is_cancelled,
+                            )
+                            processed_in_runtime = 0
                     result = FetchResult(account_name=account.name, ok=False, note=str(exc))
                 if is_cancelled is not None and is_cancelled():
                     raise CancelledError("任务已取消")
