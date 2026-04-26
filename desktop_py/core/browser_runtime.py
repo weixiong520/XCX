@@ -49,7 +49,37 @@ def playwright_browsers_ready() -> bool:
         required_directories = required_browser_directories()
     except OSError, json.JSONDecodeError, KeyError, TypeError:
         return False
-    return all((root / name).exists() for name in required_directories)
+    return all(_browser_directory_ready(root / name) for name in required_directories)
+
+
+def _browser_directory_ready(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    candidates = _browser_executable_candidates(path)
+    return bool(candidates) and any(candidate.exists() for candidate in candidates)
+
+
+def _browser_executable_candidates(path: Path) -> list[Path]:
+    name = path.name
+    if name.startswith("chromium_headless_shell-"):
+        return [
+            path / "chrome-win" / "headless_shell.exe",
+            path / "chrome-linux" / "headless_shell",
+            path / "chrome-mac" / "headless_shell",
+        ]
+    if name.startswith("chromium-"):
+        return [
+            path / "chrome-win" / "chrome.exe",
+            path / "chrome-linux" / "chrome",
+            path / "chrome-mac" / "Chromium.app" / "Contents" / "MacOS" / "Chromium",
+        ]
+    if name.startswith("ffmpeg-"):
+        return [
+            path / "ffmpeg-win64.exe",
+            path / "ffmpeg-linux",
+            path / "ffmpeg-mac",
+        ]
+    return []
 
 
 def playwright_install_command() -> list[str]:

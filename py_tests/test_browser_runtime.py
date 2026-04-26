@@ -33,8 +33,15 @@ class BrowserRuntimeTestCase(unittest.TestCase):
     def test_playwright_browsers_ready_checks_required_directories(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            for name in ("chromium-1208", "chromium_headless_shell-1208", "ffmpeg-1011"):
-                (root / name).mkdir()
+            (root / "chromium-1208" / "chrome-win").mkdir(parents=True)
+            (root / "chromium-1208" / "chrome-win" / "chrome.exe").write_text("", encoding="utf-8")
+            (root / "chromium_headless_shell-1208" / "chrome-win").mkdir(parents=True)
+            (root / "chromium_headless_shell-1208" / "chrome-win" / "headless_shell.exe").write_text(
+                "",
+                encoding="utf-8",
+            )
+            (root / "ffmpeg-1011").mkdir()
+            (root / "ffmpeg-1011" / "ffmpeg-win64.exe").write_text("", encoding="utf-8")
 
             with (
                 patch("desktop_py.core.browser_runtime.configure_playwright_environment", return_value=root),
@@ -45,13 +52,24 @@ class BrowserRuntimeTestCase(unittest.TestCase):
             ):
                 self.assertTrue(playwright_browsers_ready())
 
-            (root / "ffmpeg-1011").rmdir()
+            (root / "ffmpeg-1011" / "ffmpeg-win64.exe").unlink()
             with (
                 patch("desktop_py.core.browser_runtime.configure_playwright_environment", return_value=root),
                 patch(
                     "desktop_py.core.browser_runtime.required_browser_directories",
                     return_value=["chromium-1208", "chromium_headless_shell-1208", "ffmpeg-1011"],
                 ),
+            ):
+                self.assertFalse(playwright_browsers_ready())
+
+    def test_playwright_browsers_ready_rejects_directory_without_executable(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "chromium-1208" / "chrome-win").mkdir(parents=True)
+
+            with (
+                patch("desktop_py.core.browser_runtime.configure_playwright_environment", return_value=root),
+                patch("desktop_py.core.browser_runtime.required_browser_directories", return_value=["chromium-1208"]),
             ):
                 self.assertFalse(playwright_browsers_ready())
 

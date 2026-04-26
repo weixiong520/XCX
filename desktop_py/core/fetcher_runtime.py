@@ -2,20 +2,23 @@ from __future__ import annotations
 
 import atexit
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from desktop_py.core.fetcher_support import FetchError, persist_storage_state
+from desktop_py.core.models import AccountConfig
 
 
 @dataclass
 class GroupRuntime:
     group_key: str
-    sync_manager: object
-    playwright: object
-    browser: object | None
-    context: object
-    page: object
+    sync_manager: Any
+    playwright: Any
+    browser: Any | None
+    context: Any
+    page: Any
     profile_dir: str
     state_path: Path | None
     persist_state: bool
@@ -29,9 +32,10 @@ class GroupRuntime:
 _RUNTIME_LOCK = threading.RLock()
 _RUNTIME_CONDITION = threading.Condition(_RUNTIME_LOCK)
 _GROUP_RUNTIMES: dict[str, GroupRuntime] = {}
+_CREATING_RUNTIME_KEYS: set[str] = set()
 
 
-def runtime_group_key(account, profile_dir: str) -> str:
+def runtime_group_key(account: AccountConfig, profile_dir: str) -> str:
     return profile_dir.strip() or account.state_path
 
 
@@ -72,12 +76,12 @@ def _close_runtime(runtime: GroupRuntime) -> None:
 
 
 def _create_runtime(
-    account,
+    account: AccountConfig,
     *,
     headless: bool,
     profile_dir: str,
-    sync_playwright_fn,
-    create_browser_context_fn,
+    sync_playwright_fn: Callable[[], Any],
+    create_browser_context_fn: Callable[[Any, AccountConfig, bool, str], tuple[Any | None, Any]],
 ) -> GroupRuntime:
     sync_manager = sync_playwright_fn()
     playwright = sync_manager.__enter__()
@@ -110,14 +114,14 @@ def _create_runtime(
 
 
 def acquire_group_runtime(
-    account,
+    account: AccountConfig,
     *,
     headless: bool,
     profile_dir: str,
-    sync_playwright_fn,
-    create_browser_context_fn,
-    logger: callable | None = None,
-    is_cancelled: callable | None = None,
+    sync_playwright_fn: Callable[[], Any],
+    create_browser_context_fn: Callable[[Any, AccountConfig, bool, str], tuple[Any | None, Any]],
+    logger: Callable[[str], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> GroupRuntime:
     group_key = runtime_group_key(account, profile_dir)
     while True:
@@ -126,16 +130,12 @@ def acquire_group_runtime(
         with _RUNTIME_CONDITION:
             runtime = _GROUP_RUNTIMES.get(group_key)
             if runtime is None:
-                runtime = _create_runtime(
-                    account,
-                    headless=headless,
-                    profile_dir=profile_dir,
-                    sync_playwright_fn=sync_playwright_fn,
-                    create_browser_context_fn=create_browser_context_fn,
-                )
-                runtime.busy = True
-                _GROUP_RUNTIMES[group_key] = runtime
-                return runtime
+                if group_key in _CREATING_RUNTIME_KEYS:
+                    _log(logger, f"组级运行时正在创建，等待完成：{group_key}")
+                    _RUNTIME_CONDITION.wait(timeout=0.2)
+                    continue
+                _CREATING_RUNTIME_KEYS.add(group_key)
+                break
             if not runtime.valid:
                 _GROUP_RUNTIMES.pop(group_key, None)
                 continue
@@ -144,6 +144,27 @@ def acquire_group_runtime(
                 return runtime
             _log(logger, f"组级运行时忙碌，等待释放：{group_key}")
             _RUNTIME_CONDITION.wait(timeout=0.2)
+
+    try:
+        runtime = _create_runtime(
+            account,
+            headless=headless,
+            profile_dir=profile_dir,
+            sync_playwright_fn=sync_playwright_fn,
+            create_browser_context_fn=create_browser_context_fn,
+        )
+    except Exception:
+        with _RUNTIME_CONDITION:
+            _CREATING_RUNTIME_KEYS.discard(group_key)
+            _RUNTIME_CONDITION.notify_all()
+        raise
+
+    with _RUNTIME_CONDITION:
+        runtime.busy = True
+        _GROUP_RUNTIMES[group_key] = runtime
+        _CREATING_RUNTIME_KEYS.discard(group_key)
+        _RUNTIME_CONDITION.notify_all()
+        return runtime
 
 
 def release_group_runtime(runtime: GroupRuntime) -> None:
@@ -158,9 +179,13 @@ def invalidate_group_runtime(runtime: GroupRuntime, message: str = "") -> None:
         if current is runtime:
             _GROUP_RUNTIMES.pop(runtime.group_key, None)
         runtime.last_error = message.strip()
-        try:
-            _close_runtime(runtime)
-        finally:
+        runtime.valid = False
+        runtime.busy = False
+        _RUNTIME_CONDITION.notify_all()
+    try:
+        _close_runtime(runtime)
+    finally:
+        with _RUNTIME_CONDITION:
             _RUNTIME_CONDITION.notify_all()
 
 
@@ -168,6 +193,8 @@ def close_all_group_runtimes() -> None:
     with _RUNTIME_CONDITION:
         runtimes = list(_GROUP_RUNTIMES.values())
         _GROUP_RUNTIMES.clear()
+        _CREATING_RUNTIME_KEYS.clear()
+        _RUNTIME_CONDITION.notify_all()
     for runtime in runtimes:
         try:
             _close_runtime(runtime)
@@ -204,7 +231,7 @@ def should_invalidate_runtime(exc: Exception) -> bool:
     return any(token in message for token in fatal_tokens)
 
 
-def _log(logger: callable | None, message: str) -> None:
+def _log(logger: Callable[[str], None] | None, message: str) -> None:
     if logger:
         logger(message)
 

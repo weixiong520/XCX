@@ -136,7 +136,8 @@ def ensure_runtime_dirs() -> None:
 def load_accounts() -> list[AccountConfig]:
     ensure_runtime_dirs()
     data = cast(list[dict[str, Any]], read_json_file(ACCOUNTS_FILE))
-    return [AccountConfig(**item) for item in data]
+    allowed = {item.name for item in fields(AccountConfig)}
+    return [AccountConfig(**{key: value for key, value in item.items() if key in allowed}) for item in data]
 
 
 def save_accounts(accounts: list[AccountConfig]) -> None:

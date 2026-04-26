@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from typing import Any
 
 SESSION_STATUS_MISSING = "missing"
 SESSION_STATUS_VALID = "valid"
@@ -33,7 +34,7 @@ class AccountConfig:
     last_session_error: str = ""
     last_actual_account_name: str = ""
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -46,7 +47,7 @@ class AppSettings:
     current_main_account_name: str = ""
     auto_fetch_push_enabled: bool = False
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -62,5 +63,5 @@ class FetchResult:
     note: str = ""
     fetched_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)

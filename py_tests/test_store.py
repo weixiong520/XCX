@@ -83,6 +83,35 @@ class StoreTestCase(unittest.TestCase):
 
         self.assertEqual(accounts[0].name, "测试账号")
 
+    def test_load_accounts_ignores_unknown_fields(self):
+        with TemporaryDirectory() as temp_dir:
+            accounts_path = Path(temp_dir) / "accounts.json"
+            accounts_path.write_text(
+                '[{"name":"测试账号","state_path":"storage/test.json","legacy_field":"旧版本字段"}]\n',
+                encoding="utf-8",
+            )
+
+            with (
+                patch("desktop_py.core.store.ACCOUNTS_FILE", accounts_path),
+                patch("desktop_py.core.store.ensure_runtime_dirs"),
+            ):
+                accounts = load_accounts()
+
+        self.assertEqual(accounts[0].name, "测试账号")
+        self.assertFalse(hasattr(accounts[0], "legacy_field"))
+
+    def test_load_accounts_still_rejects_missing_required_fields(self):
+        with TemporaryDirectory() as temp_dir:
+            accounts_path = Path(temp_dir) / "accounts.json"
+            accounts_path.write_text('[{"name":"测试账号"}]\n', encoding="utf-8")
+
+            with (
+                patch("desktop_py.core.store.ACCOUNTS_FILE", accounts_path),
+                patch("desktop_py.core.store.ensure_runtime_dirs"),
+            ):
+                with self.assertRaises(TypeError):
+                    load_accounts()
+
     def test_save_settings_persists_auto_fetch_push_enabled(self):
         with TemporaryDirectory() as temp_dir:
             settings_path = Path(temp_dir) / "settings.json"

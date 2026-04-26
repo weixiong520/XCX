@@ -1,10 +1,60 @@
 import unittest
+from unittest.mock import patch
 
 from desktop_py.core.models import FetchResult
-from desktop_py.core.notifier import build_summary
+from desktop_py.core.notifier import build_summary, send_feishu_text
+
+
+class FakeFeishuResponse:
+    def __init__(self, payload=None, json_error: Exception | None = None):
+        self.payload = payload
+        self.json_error = json_error
+        self.raise_for_status_called = False
+
+    def raise_for_status(self):
+        self.raise_for_status_called = True
+
+    def json(self):
+        if self.json_error is not None:
+            raise self.json_error
+        return self.payload
 
 
 class NotifierTestCase(unittest.TestCase):
+    def test_send_feishu_text_accepts_success_response(self):
+        response = FakeFeishuResponse({"code": 0, "msg": "success"})
+
+        with patch("desktop_py.core.notifier.requests.post", return_value=response) as mock_post:
+            send_feishu_text("https://example.com/hook", "内容")
+
+        mock_post.assert_called_once_with(
+            "https://example.com/hook",
+            json={"msg_type": "text", "content": {"text": "内容"}},
+            timeout=20,
+        )
+        self.assertTrue(response.raise_for_status_called)
+
+    def test_send_feishu_text_rejects_business_error(self):
+        response = FakeFeishuResponse({"code": 19021, "msg": "机器人不存在"})
+
+        with patch("desktop_py.core.notifier.requests.post", return_value=response):
+            with self.assertRaisesRegex(ValueError, "业务码 19021：机器人不存在"):
+                send_feishu_text("https://example.com/hook", "内容")
+
+    def test_send_feishu_text_rejects_non_json_response(self):
+        response = FakeFeishuResponse(json_error=ValueError("not json"))
+
+        with patch("desktop_py.core.notifier.requests.post", return_value=response):
+            with self.assertRaisesRegex(ValueError, "响应不是有效 JSON"):
+                send_feishu_text("https://example.com/hook", "内容")
+
+    def test_send_feishu_text_rejects_missing_business_code(self):
+        response = FakeFeishuResponse({"msg": "success"})
+
+        with patch("desktop_py.core.notifier.requests.post", return_value=response):
+            with self.assertRaisesRegex(ValueError, "缺少业务状态码"):
+                send_feishu_text("https://example.com/hook", "内容")
+
     def test_summary_contains_actual_account_name(self):
         text = build_summary(
             [

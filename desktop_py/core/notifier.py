@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 import requests
 
@@ -12,6 +13,32 @@ def send_feishu_text(webhook: str, content: str) -> None:
         raise ValueError("飞书机器人地址不能为空。")
     response = requests.post(webhook, json={"msg_type": "text", "content": {"text": content}}, timeout=20)
     response.raise_for_status()
+    payload = _read_feishu_response(response)
+    code = _feishu_response_code(payload)
+    if code != 0:
+        message = str(payload.get("msg") or payload.get("message") or payload.get("StatusMessage") or "").strip()
+        suffix = f"：{message}" if message else ""
+        raise ValueError(f"飞书消息发送失败，业务码 {code}{suffix}")
+
+
+def _read_feishu_response(response: requests.Response) -> dict[str, Any]:
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise ValueError("飞书消息发送失败：响应不是有效 JSON。") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("飞书消息发送失败：响应内容格式不正确。")
+    return payload
+
+
+def _feishu_response_code(payload: dict[str, Any]) -> int:
+    raw_code = payload.get("code", payload.get("StatusCode", payload.get("status_code")))
+    if raw_code is None:
+        raise ValueError("飞书消息发送失败：响应缺少业务状态码。")
+    try:
+        return int(raw_code)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("飞书消息发送失败：响应缺少业务状态码。") from exc
 
 
 def build_summary(results: list[FetchResult]) -> str:

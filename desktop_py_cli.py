@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Sequence
 
 from desktop_py.core.fetcher import fetch_account, save_login_state, save_login_state_with_profile
-from desktop_py.core.models import FetchResult
+from desktop_py.core.models import AccountConfig, FetchResult
 from desktop_py.core.notifier import build_summary, send_feishu_text
 from desktop_py.core.session_links import propagate_account_feedback_url, refresh_account_feedback_url
 from desktop_py.core.store import load_accounts, load_settings, save_accounts
 
 
-def enabled_imported_accounts(accounts: list[object]) -> list[object]:
+def enabled_imported_accounts(accounts: Sequence[AccountConfig]) -> list[AccountConfig]:
     return [account for account in accounts if account.enabled and not account.is_entry_account]
 
 
@@ -36,21 +37,21 @@ def main() -> int:
         return 0
 
     if args.command == "fetch-all":
-        results = []
+        fetch_results: list[dict[str, object]] = []
         changed = False
         for account in enabled_imported_accounts(accounts):
             try:
                 result = fetch_account(account, 0, settings.headless_fetch, print, settings.browser_profile_dir)
-                results.append(result.to_dict())
+                fetch_results.append(result.to_dict())
                 if refresh_account_feedback_url(account, result.page_url):
                     changed = True
                 if propagate_account_feedback_url(accounts, account):
                     changed = True
             except Exception as exc:
-                results.append({"account_name": account.name, "ok": False, "note": str(exc)})
+                fetch_results.append({"account_name": account.name, "ok": False, "note": str(exc)})
         if changed:
             save_accounts(accounts)
-        print(json.dumps(results, ensure_ascii=False, indent=2))
+        print(json.dumps(fetch_results, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "notify":
