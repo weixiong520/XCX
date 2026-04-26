@@ -404,12 +404,16 @@ class UiSmokeTestCase(unittest.TestCase):
         account = AccountConfig(name="入口账号", state_path="storage/shared.json", is_entry_account=True)
         window.accounts = [account]
 
-        with patch("desktop_py.ui.main_window.save_accounts"):
+        with (
+            patch("desktop_py.ui.main_window.save_accounts"),
+            patch("desktop_py.ui.main_window.close_all_group_runtimes") as mock_close_runtimes,
+        ):
             window._mark_login(account)
 
         self.assertEqual(account.last_status, "已保存登录态")
         self.assertEqual(account.last_note, "可继续导入账号或直接抓取")
         self.assertIn("登录态已保存完成", window.log_edit.toPlainText())
+        mock_close_runtimes.assert_called_once_with()
 
     def test_mark_login_propagates_feedback_url_to_shared_accounts(self):
         window = MainWindow()
@@ -1150,7 +1154,7 @@ class UiSmokeTestCase(unittest.TestCase):
             self.assertEqual(mock_renew.call_args.args[0].name, "entry")
             self.assertFalse(mock_renew.call_args.args[3])
 
-    def test_run_auto_renew_inherits_feedback_url_from_shared_account(self):
+    def test_run_auto_renew_does_not_inherit_feedback_url_from_shared_account(self):
         with patch.dict(os.environ, {"QT_QPA_PLATFORM": "windows"}):
             window = MainWindow()
             self.addCleanup(window.close)
@@ -1172,10 +1176,7 @@ class UiSmokeTestCase(unittest.TestCase):
             with patch("desktop_py.ui.main_window.renew_account_state", return_value=True) as mock_renew:
                 self.assertTrue(job(lambda _message: None))
 
-            self.assertEqual(
-                mock_renew.call_args.args[0].feedback_url,
-                "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=shared&lang=zh_CN",
-            )
+            self.assertEqual(mock_renew.call_args.args[0].feedback_url, "")
 
     def test_renew_selected_passes_headless_fetch_setting(self):
         window = MainWindow()
@@ -1197,7 +1198,7 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertEqual(mock_renew.call_args.args[0].name, "entry")
         self.assertFalse(mock_renew.call_args.args[3])
 
-    def test_renew_selected_inherits_feedback_url_from_shared_account(self):
+    def test_renew_selected_does_not_inherit_feedback_url_from_shared_account(self):
         window = MainWindow()
         self.addCleanup(window.close)
         shared_feedback_url = "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=shared"
@@ -1220,10 +1221,7 @@ class UiSmokeTestCase(unittest.TestCase):
 
         job = mock_run_thread.call_args.args[0]
         self.assertTrue(job(lambda _message: None))
-        self.assertEqual(
-            mock_renew.call_args.args[0].feedback_url,
-            "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=shared&lang=zh_CN",
-        )
+        self.assertEqual(mock_renew.call_args.args[0].feedback_url, "")
 
     def test_login_renew_and_validate_buttons_keep_left_to_right_order(self):
         window = MainWindow()
@@ -1256,7 +1254,7 @@ class UiSmokeTestCase(unittest.TestCase):
 
         self.assertTrue(window.stop_fetch_button.isEnabled())
 
-    def test_mark_fetch_result_propagates_feedback_url_to_shared_entry_account(self):
+    def test_mark_fetch_result_does_not_propagate_feedback_url_to_shared_entry_account(self):
         window = MainWindow()
         self.addCleanup(window.close)
         window.accounts = [
@@ -1272,11 +1270,8 @@ class UiSmokeTestCase(unittest.TestCase):
         with patch("desktop_py.ui.main_window.save_accounts"), patch.object(window, "_update_current_main_account"):
             window._mark_fetch_result(window.accounts[1], result)
 
-        self.assertEqual(
-            window.accounts[0].feedback_url,
-            "https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?action=plugin_redirect&plugin_uin=1010&selected=2&token=current&lang=zh_CN",
-        )
-        self.assertEqual(window.accounts[1].feedback_url, window.accounts[0].feedback_url)
+        self.assertEqual(window.accounts[0].feedback_url, "")
+        self.assertEqual(window.accounts[1].feedback_url, result.page_url)
 
     def test_stop_fetching_keeps_button_enabled_until_worker_exits(self):
         window = MainWindow()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -59,6 +60,7 @@ class SafePageContent(Protocol):
 class StorageStateSaveResult:
     attempts: int
     indexed_db: bool = True
+    fallback_verified: bool = False
 
 
 def _page_is_closed(page: Page | None) -> bool:
@@ -249,6 +251,7 @@ def persist_storage_state(
     wait_or_cancel_fn: WaitOrCancel = wait_or_cancel,
     is_cancelled: CancelCheck | None = None,
     retry_delays_ms: tuple[int, ...] = STORAGE_STATE_RETRY_DELAYS_MS,
+    fallback_verify_fn: Callable[[str], bool] | None = None,
 ) -> StorageStateSaveResult:
     target = Path(state_path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -276,6 +279,26 @@ def persist_storage_state(
         except Exception as exc:
             last_error = exc
             if attempt >= total_attempts or not _is_indexed_db_serialization_error(exc):
+                if attempt >= total_attempts and _is_indexed_db_serialization_error(exc) and fallback_verify_fn:
+                    if log_fn is not None:
+                        log_fn(logger, "IndexedDB 序列化持续失败，尝试降级保存 Cookie/LocalStorage 并复验登录态。")
+                    temp_path = target.with_name(f".{target.name}.fallback.tmp")
+                    try:
+                        context.storage_state(path=str(temp_path), indexed_db=False)
+                        if fallback_verify_fn(str(temp_path)):
+                            os.replace(str(temp_path), str(target))
+                            if log_fn is not None:
+                                log_fn(logger, "降级登录态已通过复验并保存。")
+                            return StorageStateSaveResult(
+                                attempts=attempt,
+                                indexed_db=False,
+                                fallback_verified=True,
+                            )
+                    finally:
+                        try:
+                            temp_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
                 raise
 
     if last_error is not None:

@@ -34,6 +34,7 @@ from desktop_py.core.fetcher_support import (
     extract_response_token,
     is_login_timeout_page,
     recover_login_timeout_page,
+    persist_storage_state,
     safe_page_content,
     wait_for_iframe_ready,
     wait_for_url_contains,
@@ -508,6 +509,68 @@ class FetcherTestCase(unittest.TestCase):
 
         with self.assertRaisesRegex(CancelledError, "任务已取消"):
             wait_or_cancel(page, 200, lambda: True)
+
+    def test_persist_storage_state_falls_back_when_indexed_db_export_keeps_failing(self):
+        calls: list[str] = []
+        logs: list[str] = []
+
+        class FakeContext:
+            def storage_state(self, path=None, indexed_db=False):
+                calls.append(f"storage:{Path(path).name}:{indexed_db}")
+                if indexed_db:
+                    raise RuntimeError("Unable to serialize IndexedDB: Internal error.")
+                Path(path).write_text('{"cookies":[],"origins":[]}', encoding="utf-8")
+
+        class FakePageForStorage:
+            def wait_for_load_state(self, state=None, timeout=None):
+                calls.append(f"load:{state}:{timeout}")
+
+            def wait_for_timeout(self, timeout):
+                calls.append(f"wait:{timeout}")
+
+            def is_closed(self):
+                return False
+
+        with TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "state.json"
+            result = persist_storage_state(
+                FakeContext(),
+                str(target),
+                page=FakePageForStorage(),
+                logger=logs.append,
+                log_fn=lambda logger, message: logger(message),
+                retry_delays_ms=(1, 2),
+                fallback_verify_fn=lambda temp_path: Path(temp_path).exists(),
+            )
+
+            self.assertTrue(target.exists())
+
+        self.assertFalse(result.indexed_db)
+        self.assertTrue(result.fallback_verified)
+        self.assertEqual(result.attempts, 3)
+        self.assertEqual(calls.count("storage:state.json:True"), 3)
+        self.assertIn("storage:.state.json.fallback.tmp:False", calls)
+        self.assertIn("降级登录态已通过复验并保存。", logs[-1])
+
+    def test_persist_storage_state_keeps_original_when_fallback_verification_fails(self):
+        class FakeContext:
+            def storage_state(self, path=None, indexed_db=False):
+                if indexed_db:
+                    raise RuntimeError("Unable to serialize IndexedDB: Internal error.")
+                Path(path).write_text('{"cookies":[],"origins":[]}', encoding="utf-8")
+
+        with TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "state.json"
+            target.write_text("original", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "Unable to serialize IndexedDB"):
+                persist_storage_state(
+                    FakeContext(),
+                    str(target),
+                    retry_delays_ms=(),
+                    fallback_verify_fn=lambda _temp_path: False,
+                )
+
+            self.assertEqual(target.read_text(encoding="utf-8"), "original")
 
     def test_business_iframe_selector_prefers_js_iframe(self):
         page = FakePage(
@@ -2191,6 +2254,47 @@ class FetcherTestCase(unittest.TestCase):
 
         self.assertEqual(calls, ["page", "context", "browser"])
 
+    def test_fetch_switchable_accounts_uses_home_url_instead_of_stale_feedback_url(self):
+        calls: list[str] = []
+
+        class FakePageForSwitch:
+            def goto(self, url, wait_until=None, timeout=None):
+                calls.append(f"goto:{url}")
+
+            def close(self):
+                calls.append("page")
+
+        class FakeContextForSwitch:
+            def __init__(self):
+                self.page = FakePageForSwitch()
+
+            def new_page(self):
+                return self.page
+
+            def close(self):
+                calls.append("context")
+
+        account = AccountConfig(
+            name="主账号",
+            state_path="storage/shared.json",
+            home_url="https://mp.weixin.qq.com/",
+            feedback_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=old",
+        )
+
+        with (
+            patch("desktop_py.core.fetcher.sync_playwright") as mock_playwright,
+            patch("desktop_py.core.fetcher.create_browser_context", return_value=(None, FakeContextForSwitch())),
+            patch("desktop_py.core.fetcher.wait_for_url_contains", return_value=True),
+            patch("desktop_py.core.fetcher.list_switchable_accounts", return_value=["账号A"]),
+            patch("desktop_py.core.fetcher.Path.exists", return_value=True),
+        ):
+            mock_playwright.return_value.__enter__.return_value = object()
+
+            names = fetch_switchable_accounts(account)
+
+        self.assertEqual(names, ["账号A"])
+        self.assertEqual(calls[0], "goto:https://mp.weixin.qq.com/")
+
     def test_validate_account_state_does_not_persist_shared_profile_state(self):
         calls: list[str] = []
 
@@ -2236,7 +2340,7 @@ class FetcherTestCase(unittest.TestCase):
         self.assertNotIn("storage:storage\\shared.json:True", calls)
         self.assertEqual(calls[-2:], ["page", "context"])
 
-    def test_validate_account_state_trusts_transient_backend_url_match(self):
+    def test_validate_account_state_rejects_transient_backend_url_match_without_page_signals(self):
         calls: list[str] = []
 
         class FakePageForValidation:
@@ -2244,6 +2348,15 @@ class FetcherTestCase(unittest.TestCase):
 
             def goto(self, _url, wait_until=None, timeout=None):
                 calls.append("goto")
+
+            def content(self):
+                return "<html></html>"
+
+            def locator(self, selector, **kwargs):
+                return FakeLocator()
+
+            def get_by_text(self, text, exact=False):
+                return FakeLocator()
 
             def close(self):
                 calls.append("page")
@@ -2271,7 +2384,7 @@ class FetcherTestCase(unittest.TestCase):
 
             valid = validate_account_state(AccountConfig(name="主账号", state_path="storage/shared.json"))
 
-        self.assertTrue(valid)
+        self.assertFalse(valid)
         mock_wait.assert_called_once_with(
             mock_wait.call_args.args[0],
             ("token=", "/wxamp/index/index", "pluginRedirect/gameFeedback"),
@@ -2669,7 +2782,7 @@ class FetcherTestCase(unittest.TestCase):
         self.assertIn("recover", calls)
         self.assertIn("storage:storage\\shared.json:True", calls)
 
-    def test_renew_account_state_falls_back_to_saved_feedback_url(self):
+    def test_renew_account_state_does_not_fall_back_to_saved_feedback_url(self):
         calls: list[str] = []
 
         class FakePageForRenew:
@@ -2714,17 +2827,11 @@ class FetcherTestCase(unittest.TestCase):
                 profile_dir="",
             )
 
-        self.assertTrue(valid)
-        self.assertEqual(
-            calls[:2],
-            [
-                "goto:https://mp.weixin.qq.com/",
-                f"goto:{feedback_url}",
-            ],
-        )
-        self.assertIn("storage:storage\\shared.json:True", calls)
+        self.assertFalse(valid)
+        self.assertEqual(calls[:1], ["goto:https://mp.weixin.qq.com/"])
+        self.assertFalse(any(call.startswith("storage:") for call in calls))
 
-    def test_renew_account_state_falls_back_to_feedback_url_when_home_timeout(self):
+    def test_renew_account_state_fails_without_overwriting_when_home_timeout(self):
         calls: list[str] = []
 
         class FakePageForRenew:
@@ -2771,15 +2878,9 @@ class FetcherTestCase(unittest.TestCase):
                 profile_dir="",
             )
 
-        self.assertTrue(valid)
-        self.assertEqual(
-            calls[:2],
-            [
-                "goto:https://mp.weixin.qq.com/",
-                f"goto:{feedback_url}",
-            ],
-        )
-        self.assertIn("storage:storage\\shared.json:True", calls)
+        self.assertFalse(valid)
+        self.assertEqual(calls[:1], ["goto:https://mp.weixin.qq.com/"])
+        self.assertFalse(any(call.startswith("storage:") for call in calls))
 
     def test_renew_account_state_does_not_overwrite_state_when_invalid(self):
         calls: list[str] = []
@@ -3030,7 +3131,6 @@ class FetcherTestCase(unittest.TestCase):
         self.assertTrue(valid)
         self.assertIn("page", calls)
         self.assertIn("storage:storage\\shared.json:True", calls)
-        self.assertFalse(any(call.startswith("wait:") for call in calls))
 
 
 if __name__ == "__main__":

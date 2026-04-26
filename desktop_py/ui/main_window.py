@@ -488,7 +488,13 @@ class MainWindow(QMainWindow):
         )
 
     def _mark_login(self, account: AccountConfig) -> None:
-        mark_login_impl(self, account, datetime_cls=datetime, save_accounts_fn=save_accounts)
+        mark_login_impl(
+            self,
+            account,
+            datetime_cls=datetime,
+            save_accounts_fn=save_accounts,
+            close_all_group_runtimes_fn=close_all_group_runtimes,
+        )
 
     def _login_start_message(self, account: AccountConfig) -> str:
         return login_start_message_impl(self, account)

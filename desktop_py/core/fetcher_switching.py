@@ -359,7 +359,7 @@ def fetch_switchable_accounts_impl(
         browser, context = create_browser_context_fn(playwright, account, headless, normalized_profile_dir)
         page = context.new_page()
         try:
-            bootstrap_url = account.feedback_url.strip() or account.home_url
+            bootstrap_url = account.home_url
             page.goto(bootstrap_url, wait_until="domcontentloaded", timeout=60000)
             wait_for_url_contains_fn(
                 page, ("token=", "/wxamp/index/index", "pluginRedirect/gameFeedback"), timeout_ms=4000
