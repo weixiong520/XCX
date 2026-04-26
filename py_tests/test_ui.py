@@ -253,6 +253,18 @@ class UiSmokeTestCase(unittest.TestCase):
         self.assertEqual(window.table.item(0, 3).text(), "失败")
         self.assertEqual(window.table.item(0, 1).toolTip(), "切换账号列表中未找到目标账号")
 
+    def test_append_log_keeps_only_recent_200_lines(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+
+        for index in range(210):
+            window.append_log(f"第 {index} 条日志")
+
+        log_lines = window.log_edit.toPlainText().splitlines()
+        self.assertEqual(len(log_lines), 200)
+        self.assertIn("第 10 条日志", log_lines[0])
+        self.assertIn("第 209 条日志", log_lines[-1])
+
     def test_no_business_page_failure_shows_short_description(self):
         window = MainWindow()
         self.addCleanup(window.close)
@@ -874,7 +886,6 @@ class UiSmokeTestCase(unittest.TestCase):
             AccountConfig(name="导入账号A", state_path="storage/shared.json", is_entry_account=False, enabled=True),
         ]
         job = window._build_fetch_job(accounts)
-
         with patch("desktop_py.ui.main_window.fetch_accounts_batch", return_value=[]) as mock_batch:
             result = job(lambda _message: None, lambda _payload: None)
 

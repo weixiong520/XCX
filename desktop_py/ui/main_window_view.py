@@ -26,6 +26,8 @@ from desktop_py.ui.account_presenter import (
     display_result_text,
 )
 
+MAX_LOG_BLOCK_COUNT = 200
+
 
 def build_ui(window, hover_table_cls, row_highlight_delegate_cls) -> None:
     central = QWidget(window)
@@ -77,6 +79,7 @@ def build_ui(window, hover_table_cls, row_highlight_delegate_cls) -> None:
     window.log_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     window.log_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     window.log_edit.setMinimumHeight(170)
+    window.log_edit.setMaximumBlockCount(MAX_LOG_BLOCK_COUNT)
 
     body_layout = QGridLayout()
     body_layout.setContentsMargins(0, 0, 0, 0)
