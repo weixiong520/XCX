@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
 from desktop_py.app import ensure_browser_runtime
+from desktop_py.ui.workers import TaskThread
 
 
 class FakeTaskThread(QObject):
@@ -21,6 +22,8 @@ class FakeTaskThread(QObject):
         self._should_fail = should_fail
         self._job_builder = None
         self._task = object()
+        self.shutdown_called = False
+        self.wait_called = False
 
     def enqueue(
         self,
@@ -47,6 +50,21 @@ class FakeTaskThread(QObject):
 
     def deleteLater(self):
         return None
+
+    def shutdown(self):
+        self.shutdown_called = True
+
+    def wait(self, _timeout):
+        self.wait_called = True
+        return True
+
+
+class SpyTaskThread(TaskThread):
+    instances: list[SpyTaskThread] = []
+
+    def __init__(self):
+        super().__init__()
+        SpyTaskThread.instances.append(self)
 
 
 class AppTestCase(unittest.TestCase):
@@ -82,6 +100,18 @@ class AppTestCase(unittest.TestCase):
             self.assertTrue(ensure_browser_runtime(self.app))
 
         mock_install.assert_called_once()
+
+    def test_ensure_browser_runtime_waits_for_real_install_thread_to_stop(self):
+        SpyTaskThread.instances = []
+        with (
+            patch("desktop_py.app.playwright_browsers_ready", return_value=False),
+            patch("desktop_py.app.TaskThread", side_effect=lambda: SpyTaskThread()),
+            patch("desktop_py.app.install_playwright_browsers", return_value=(True, "ok")),
+        ):
+            self.assertTrue(ensure_browser_runtime(self.app))
+
+        self.assertEqual(len(SpyTaskThread.instances), 1)
+        self.assertFalse(SpyTaskThread.instances[0].isRunning())
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 from desktop_py.core.fetcher_support import (
     CancelledError,
@@ -15,16 +17,20 @@ from desktop_py.core.store import write_fetch_result
 
 BATCH_RUNTIME_REFRESH_EVERY = 5
 
+Logger = Callable[[str], None]
+CancelCheck = Callable[[], bool]
+LogFn = Callable[[Logger | None, str], None]
+
 
 def _prepare_account_session_for_fetch(
     account: AccountConfig,
     *,
-    logger,
+    logger: Logger | None,
     profile_dir: str,
     headless: bool,
-    log_fn,
-    validate_account_state_fn,
-    renew_account_state_fn,
+    log_fn: LogFn,
+    validate_account_state_fn: Callable[..., bool],
+    renew_account_state_fn: Callable[..., bool],
 ) -> None:
     session_status = account.session_status.strip()
     if not session_status or session_status == "missing":
@@ -44,21 +50,21 @@ def _prepare_account_session_for_fetch(
     raise FetchError(f"账号 {account.name} 登录态无效，请重新保存登录态。")
 
 
-def _page_current_account_name(page) -> str:
+def _page_current_account_name(page: Any) -> str:
     try:
         return str(getattr(page, "_current_account_name_cache", "") or "").strip()
     except Exception:
         return ""
 
 
-def _set_page_current_account_name(page, account_name: str) -> None:
+def _set_page_current_account_name(page: Any, account_name: str) -> None:
     try:
         setattr(page, "_current_account_name_cache", account_name.strip())
     except Exception:
         pass
 
 
-def _page_has_backend_session(page) -> bool:
+def _page_has_backend_session(page: Any) -> bool:
     try:
         current_url = str(getattr(page, "url", "") or "")
     except Exception:
@@ -66,25 +72,36 @@ def _page_has_backend_session(page) -> bool:
     return any(keyword in current_url for keyword in ("token=", "/wxamp/index/index", "pluginRedirect/gameFeedback"))
 
 
-def _recover_timeout_page_if_needed(page, *, logger, log_fn, safe_page_content_fn, is_cancelled):
+def _wait_for_timeout(current_page: Any, wait_ms: int, _cancelled: CancelCheck | None = None) -> None:
+    current_page.wait_for_timeout(wait_ms)
+
+
+def _recover_timeout_page_if_needed(
+    page: Any,
+    *,
+    logger: Logger | None,
+    log_fn: LogFn,
+    safe_page_content_fn: Callable[..., str],
+    is_cancelled: CancelCheck | None,
+) -> bool:
     return recover_login_timeout_page(
         page,
         logger=logger,
         log_fn=log_fn,
         safe_page_content_fn=safe_page_content_fn,
-        wait_or_cancel_fn=lambda current_page, wait_ms, cancelled=None: current_page.wait_for_timeout(wait_ms),
+        wait_or_cancel_fn=_wait_for_timeout,
         is_cancelled=is_cancelled,
     )
 
 
-def _set_page_home_ready(page, ready: bool) -> None:
+def _set_page_home_ready(page: Any, ready: bool) -> None:
     try:
         setattr(page, "_home_ready_cache", bool(ready))
     except Exception:
         pass
 
 
-def _page_home_ready(page) -> bool:
+def _page_home_ready(page: Any) -> bool:
     try:
         return bool(getattr(page, "_home_ready_cache", False))
     except Exception:
@@ -96,33 +113,33 @@ def resolve_bootstrap_url_impl(account: AccountConfig, output_dir: Path) -> str:
 
 
 def fetch_account_in_page_impl(
-    page,
-    context,
+    page: Any,
+    context: Any,
     account: AccountConfig,
-    logger: callable | None = None,
+    logger: Logger | None = None,
     profile_dir: str = "",
-    is_cancelled: callable | None = None,
+    is_cancelled: CancelCheck | None = None,
     *,
-    account_output_dir_fn,
-    register_response_capture_fn,
-    capture_response_payload_fn,
-    resolve_bootstrap_url_fn,
-    wait_for_url_contains_fn,
-    extract_current_account_name_fn,
-    should_switch_for_account_fn,
-    switch_to_account_fn,
-    log_fn,
-    open_feedback_page_fn,
-    build_feedback_url_fn,
-    wait_for_iframe_ready_fn,
-    resolve_frame_locator_fn,
-    business_iframe_selector_fn,
-    safe_page_content_fn,
-    fetch_notifications_fn=None,
-    is_empty_refund_list_fn,
-    confirm_empty_refund_list_fn,
-    build_empty_refund_result_fn,
-    build_detail_result_fn,
+    account_output_dir_fn: Callable[[str], Path],
+    register_response_capture_fn: Callable[..., tuple[list[Any], Callable[[], None]]],
+    capture_response_payload_fn: Callable[..., Any],
+    resolve_bootstrap_url_fn: Callable[[AccountConfig, Path], str],
+    wait_for_url_contains_fn: Callable[..., Any],
+    extract_current_account_name_fn: Callable[[Any], str],
+    should_switch_for_account_fn: Callable[[AccountConfig, str], bool],
+    switch_to_account_fn: Callable[..., Any],
+    log_fn: LogFn,
+    open_feedback_page_fn: Callable[..., str],
+    build_feedback_url_fn: Callable[..., str],
+    wait_for_iframe_ready_fn: Callable[..., Any],
+    resolve_frame_locator_fn: Callable[..., Any],
+    business_iframe_selector_fn: Callable[..., str],
+    safe_page_content_fn: Callable[..., str],
+    fetch_notifications_fn: Callable[..., dict[str, Any]] | None = None,
+    is_empty_refund_list_fn: Callable[..., bool],
+    confirm_empty_refund_list_fn: Callable[..., tuple[bool, str]],
+    build_empty_refund_result_fn: Callable[..., FetchResult],
+    build_detail_result_fn: Callable[..., FetchResult],
 ) -> FetchResult:
     output_dir = account_output_dir_fn(account.name)
     captures, cleanup_response_capture = register_response_capture_fn(page, capture_response_payload_fn)
@@ -249,7 +266,7 @@ def fetch_account_in_page_impl(
         elif not notification_outcome.get("ok", True) and notification_summary:
             write_fetch_result(account.name, result)
         _set_page_home_ready(page, False)
-        return result
+        return cast(FetchResult, result)
     finally:
         cleanup_response_capture()
 
@@ -258,23 +275,23 @@ def fetch_account_impl(
     account: AccountConfig,
     wait_seconds: int,
     headless: bool = True,
-    logger: callable | None = None,
+    logger: Logger | None = None,
     profile_dir: str = "",
-    is_cancelled: callable | None = None,
+    is_cancelled: CancelCheck | None = None,
     *,
-    sync_playwright_fn,
-    path_exists_fn,
-    validate_shared_browser_profile_dir_fn,
-    create_browser_context_fn,
-    validate_account_state_fn,
-    renew_account_state_fn,
-    fetch_account_in_page_fn,
-    acquire_group_runtime_fn,
-    release_group_runtime_fn,
-    invalidate_group_runtime_fn,
-    runtime_current_account_name_fn,
-    update_runtime_current_account_name_fn,
-    should_invalidate_runtime_fn,
+    sync_playwright_fn: Callable[..., Any],
+    path_exists_fn: Callable[[Path], bool],
+    validate_shared_browser_profile_dir_fn: Callable[[str], str],
+    create_browser_context_fn: Callable[..., tuple[Any | None, Any]],
+    validate_account_state_fn: Callable[..., bool],
+    renew_account_state_fn: Callable[..., bool],
+    fetch_account_in_page_fn: Callable[..., FetchResult],
+    acquire_group_runtime_fn: Callable[..., Any],
+    release_group_runtime_fn: Callable[[Any], None],
+    invalidate_group_runtime_fn: Callable[..., None],
+    runtime_current_account_name_fn: Callable[[Any], str],
+    update_runtime_current_account_name_fn: Callable[[Any, str], None],
+    should_invalidate_runtime_fn: Callable[[Exception], bool],
 ) -> FetchResult:
     normalized_profile_dir = normalize_profile_dir(
         profile_dir,
@@ -318,15 +335,13 @@ def fetch_account_impl(
         )
         if result.actual_account_name.strip():
             update_runtime_current_account_name_fn(runtime, result.actual_account_name)
-        return result
+        return cast(FetchResult, result)
     except Exception as exc:
         if should_invalidate_runtime_fn(exc):
             invalidate_group_runtime_fn(runtime, str(exc))
         else:
             release_group_runtime_fn(runtime)
         raise
-    else:
-        release_group_runtime_fn(runtime)
     finally:
         if runtime.busy:
             release_group_runtime_fn(runtime)
@@ -335,23 +350,23 @@ def fetch_account_impl(
 def fetch_accounts_batch_impl(
     accounts: list[AccountConfig],
     headless: bool = True,
-    logger: callable | None = None,
-    progress: callable | None = None,
+    logger: Logger | None = None,
+    progress: Callable[[FetchResult], None] | None = None,
     profile_dir: str = "",
-    is_cancelled: callable | None = None,
+    is_cancelled: CancelCheck | None = None,
     *,
-    sync_playwright_fn,
-    path_exists_fn,
-    validate_shared_browser_profile_dir_fn,
-    create_browser_context_fn,
-    validate_account_state_fn,
-    renew_account_state_fn,
-    fetch_account_in_page_fn,
-    acquire_group_runtime_fn,
-    release_group_runtime_fn,
-    invalidate_group_runtime_fn,
-    update_runtime_current_account_name_fn,
-    should_invalidate_runtime_fn,
+    sync_playwright_fn: Callable[..., Any],
+    path_exists_fn: Callable[[Path], bool],
+    validate_shared_browser_profile_dir_fn: Callable[[str], str],
+    create_browser_context_fn: Callable[..., tuple[Any | None, Any]],
+    validate_account_state_fn: Callable[..., bool],
+    renew_account_state_fn: Callable[..., bool],
+    fetch_account_in_page_fn: Callable[..., FetchResult],
+    acquire_group_runtime_fn: Callable[..., Any],
+    release_group_runtime_fn: Callable[[Any], None],
+    invalidate_group_runtime_fn: Callable[..., None],
+    update_runtime_current_account_name_fn: Callable[[Any, str], None],
+    should_invalidate_runtime_fn: Callable[[Exception], bool],
     batch_runtime_refresh_every: int = BATCH_RUNTIME_REFRESH_EVERY,
 ) -> list[FetchResult]:
     normalized_profile_dir = normalize_profile_dir(

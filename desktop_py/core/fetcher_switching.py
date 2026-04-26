@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
+from typing import Any, cast
 
 from playwright.sync_api import Locator, Page
 
@@ -14,6 +16,14 @@ from desktop_py.core.fetcher_support import (
     safe_page_content,
 )
 from desktop_py.core.models import AccountConfig
+
+Logger = Callable[[str], None]
+CancelCheck = Callable[[], bool]
+LogFn = Callable[[Logger | None, str], None]
+
+
+def _wait_for_timeout(current_page: Any, wait_ms: int, _cancelled: CancelCheck | None = None) -> None:
+    current_page.wait_for_timeout(wait_ms)
 
 
 def find_switch_entry_impl(page: Page) -> Locator | None:
@@ -75,13 +85,13 @@ def should_retry_switch_from_home_impl(current_url: str, home_url: str, has_swit
 def prepare_switch_account_page_impl(
     page: Page,
     home_url: str = "",
-    logger: callable | None = None,
+    logger: Logger | None = None,
     *,
-    switch_dialog_ready_fn,
-    find_switch_entry_fn,
-    should_retry_switch_from_home_fn,
-    log_fn,
-    wait_for_url_contains_fn,
+    switch_dialog_ready_fn: Callable[[Page], bool],
+    find_switch_entry_fn: Callable[[Page], Locator | None],
+    should_retry_switch_from_home_fn: Callable[[str, str, bool], bool],
+    log_fn: LogFn,
+    wait_for_url_contains_fn: Callable[..., Any],
 ) -> None:
     if is_login_timeout_page(page, safe_page_content_fn=safe_page_content):
         recover_login_timeout_page(
@@ -89,7 +99,7 @@ def prepare_switch_account_page_impl(
             logger=logger,
             log_fn=log_fn,
             safe_page_content_fn=safe_page_content,
-            wait_or_cancel_fn=lambda current_page, wait_ms, _is_cancelled=None: current_page.wait_for_timeout(wait_ms),
+            wait_or_cancel_fn=_wait_for_timeout,
         )
     has_switch_entry = switch_dialog_ready_fn(page) or find_switch_entry_fn(page) is not None
     if not should_retry_switch_from_home_fn(page.url, home_url, has_switch_entry):
@@ -103,7 +113,7 @@ def prepare_switch_account_page_impl(
             logger=logger,
             log_fn=log_fn,
             safe_page_content_fn=safe_page_content,
-            wait_or_cancel_fn=lambda current_page, wait_ms, _is_cancelled=None: current_page.wait_for_timeout(wait_ms),
+            wait_or_cancel_fn=_wait_for_timeout,
         )
 
 
@@ -111,10 +121,10 @@ def open_switch_account_dialog_impl(
     page: Page,
     timeout_ms: int = 12000,
     *,
-    switch_dialog_ready_fn,
-    find_switch_entry_fn,
-    maybe_expand_account_menu_fn,
-    extract_current_account_name_fn,
+    switch_dialog_ready_fn: Callable[[Page], bool],
+    find_switch_entry_fn: Callable[[Page], Locator | None],
+    maybe_expand_account_menu_fn: Callable[[Page], None],
+    extract_current_account_name_fn: Callable[[Page], str],
 ) -> None:
     if switch_dialog_ready_fn(page):
         return
@@ -142,7 +152,7 @@ def open_switch_account_dialog_impl(
     raise FetchError(f"当前页面不存在切换账号入口。当前地址：{current_url}，当前账号：{actual_name}")
 
 
-def extract_current_account_name_impl(page: Page, *, safe_page_content_fn) -> str:
+def extract_current_account_name_impl(page: Page, *, safe_page_content_fn: Callable[..., str]) -> str:
     try:
         html = safe_page_content_fn(page, timeout_ms=5000)
     except Exception:
@@ -187,29 +197,32 @@ def switch_to_account_impl(
     page: Page,
     account_name: str,
     home_url: str = "",
-    logger: callable | None = None,
+    logger: Logger | None = None,
     *,
-    prepare_switch_account_page_fn,
-    open_switch_account_dialog_fn,
-    wait_for_switch_account_items_fn,
-    wait_for_current_account_name_fn,
-    wait_for_account_switch_stable_fn,
-    log_fn,
+    prepare_switch_account_page_fn: Callable[..., Any],
+    open_switch_account_dialog_fn: Callable[..., Any],
+    wait_for_switch_account_items_fn: Callable[..., Locator],
+    wait_for_current_account_name_fn: Callable[..., str],
+    wait_for_account_switch_stable_fn: Callable[..., str],
+    log_fn: LogFn,
 ) -> None:
     prepare_switch_account_page_fn(page, home_url, logger)
     open_switch_account_dialog_fn(page)
 
     account_items = wait_for_switch_account_items_fn(page, ".switch_account_dialog .account_item", logger)
-    account_meta = account_items.evaluate_all(
-        """
+    account_meta = cast(
+        list[dict[str, Any]],
+        account_items.evaluate_all(
+            """
         elements => elements.map(el => ({
             name: (el.querySelector('.account_name')?.textContent || '').trim(),
             current: !!el.querySelector('.current_login')
         }))
         """
+        ),
     )
 
-    current_name = next((item["name"] for item in account_meta if item["current"]), "")
+    current_name = next((str(item["name"]) for item in account_meta if item["current"]), "")
     if current_name == account_name:
         log_fn(logger, f"当前已是目标账号：{account_name}")
         close_icon = page.locator(".switch_account_dialog .close_icon")
@@ -221,7 +234,7 @@ def switch_to_account_impl(
         has=page.locator(".account_name", has_text=account_name)
     )
     if target.count() == 0:
-        names = "、".join(item["name"] for item in account_meta if item["name"])
+        names = "、".join(str(item["name"]) for item in account_meta if item["name"])
         raise FetchError(f"切换账号列表中未找到“{account_name}”。当前可见账号：{names}")
 
     target.first.evaluate("e => e.click()")
@@ -237,10 +250,10 @@ def wait_for_account_switch_stable_impl(
     expected_account_name: str,
     home_url: str = "",
     *,
-    extract_current_account_name_fn,
-    wait_for_url_contains_fn,
-    wait_or_cancel_fn,
-    is_cancelled: callable | None = None,
+    extract_current_account_name_fn: Callable[[Page], str],
+    wait_for_url_contains_fn: Callable[..., Any],
+    wait_or_cancel_fn: Callable[..., Any],
+    is_cancelled: CancelCheck | None = None,
     stable_rounds: int = 2,
     interval_ms: int = 600,
 ) -> str:
@@ -248,7 +261,7 @@ def wait_for_account_switch_stable_impl(
     latest_name = ""
     matched_rounds = 0
     for _ in range(6):
-        latest_name = extract_current_account_name_fn(page).strip()
+        latest_name = str(extract_current_account_name_fn(page)).strip()
         if latest_name == expected_account_name:
             matched_rounds += 1
             if matched_rounds >= stable_rounds:
@@ -267,11 +280,11 @@ def wait_for_account_switch_stable_impl(
 def list_switchable_accounts_impl(
     page: Page,
     home_url: str = "",
-    logger: callable | None = None,
+    logger: Logger | None = None,
     *,
-    prepare_switch_account_page_fn,
-    open_switch_account_dialog_fn,
-    wait_for_switch_account_items_fn,
+    prepare_switch_account_page_fn: Callable[..., Any],
+    open_switch_account_dialog_fn: Callable[..., Any],
+    wait_for_switch_account_items_fn: Callable[..., Locator],
 ) -> list[str]:
     prepare_switch_account_page_fn(page, home_url, logger)
     open_switch_account_dialog_fn(page)
@@ -289,27 +302,27 @@ def list_switchable_accounts_impl(
     return names
 
 
-def wait_for_locator_items_impl(page: Page, locator, timeout_ms: int = 1800, interval_ms: int = 200) -> bool:
+def wait_for_locator_items_impl(page: Page, locator: Locator, timeout_ms: int = 1800, interval_ms: int = 200) -> bool:
     deadline = time.monotonic() + (timeout_ms / 1000)
     while time.monotonic() < deadline:
         if locator.count() > 0:
             return True
         page.wait_for_timeout(interval_ms)
-    return locator.count() > 0
+    return bool(locator.count() > 0)
 
 
 def wait_for_switch_account_items_impl(
     page: Page,
     selector: str,
-    logger: callable | None = None,
+    logger: Logger | None = None,
     retry_limit: int = 3,
-    is_cancelled: callable | None = None,
+    is_cancelled: CancelCheck | None = None,
     *,
-    wait_for_locator_items_fn,
-    log_fn,
-    wait_or_cancel_fn,
-    open_switch_account_dialog_fn,
-):
+    wait_for_locator_items_fn: Callable[..., bool],
+    log_fn: LogFn,
+    wait_or_cancel_fn: Callable[..., Any],
+    open_switch_account_dialog_fn: Callable[..., Any],
+) -> Locator:
     locator = page.locator(selector)
     for attempt in range(1, retry_limit + 1):
         if wait_for_locator_items_fn(page, locator):
@@ -332,17 +345,17 @@ def wait_for_switch_account_items_impl(
 def fetch_switchable_accounts_impl(
     account: AccountConfig,
     headless: bool = True,
-    logger: callable | None = None,
+    logger: Logger | None = None,
     profile_dir: str = "",
     *,
-    sync_playwright_fn,
-    path_exists_fn,
-    validate_shared_browser_profile_dir_fn,
-    create_browser_context_fn,
-    wait_for_url_contains_fn,
-    list_switchable_accounts_fn,
-    close_page_fn,
-    close_context_and_browser_fn,
+    sync_playwright_fn: Callable[..., Any],
+    path_exists_fn: Callable[..., bool],
+    validate_shared_browser_profile_dir_fn: Callable[[str], str],
+    create_browser_context_fn: Callable[..., tuple[Any | None, Any]],
+    wait_for_url_contains_fn: Callable[..., Any],
+    list_switchable_accounts_fn: Callable[..., list[str]],
+    close_page_fn: Callable[[Any], None],
+    close_context_and_browser_fn: Callable[..., None],
 ) -> list[str]:
     normalized_profile_dir = normalize_profile_dir(
         profile_dir,
@@ -374,4 +387,4 @@ def fetch_switchable_accounts_impl(
                 persist_state=bool(normalized_profile_dir),
                 page=page,
             )
-    return names
+    return list(names)

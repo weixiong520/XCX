@@ -32,8 +32,15 @@ files = [
   "desktop_py/core/notifier.py",
   "desktop_py/core/models.py",
   "desktop_py/core/parser.py",
+  "desktop_py/core/fetcher.py",
+  "desktop_py/core/fetcher_output.py",
+  "desktop_py/core/fetcher_page_strategy.py",
+  "desktop_py/core/fetcher_pipeline.py",
   "desktop_py/core/fetcher_runtime.py",
+  "desktop_py/core/fetcher_session.py",
+  "desktop_py/core/fetcher_switching.py",
   "desktop_py/core/fetcher_support.py",
+  "desktop_py/core/notification_page_strategy.py",
   "desktop_py/ui/task_runner.py",
   "desktop_py/ui/workers.py",
   "desktop_py_cli.py",
@@ -45,15 +52,3 @@ no_implicit_optional = true
 warn_return_any = true
 warn_unused_ignores = true
 disable_error_code = ["import-untyped"]
-
-[[tool.mypy.overrides]]
-module = [
-  "desktop_py.core.fetcher",
-  "desktop_py.core.fetcher_output",
-  "desktop_py.core.fetcher_page_strategy",
-  "desktop_py.core.fetcher_pipeline",
-  "desktop_py.core.fetcher_session",
-  "desktop_py.core.fetcher_switching",
-  "desktop_py.core.notification_page_strategy",
-]
-follow_imports = "skip"

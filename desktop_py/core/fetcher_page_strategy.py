@@ -10,11 +10,17 @@ from desktop_py.core.fetcher_support import FetchError, _fallback_from_responses
 from desktop_py.core.models import AccountConfig, FetchResult
 from desktop_py.core.store import write_account_output_text, write_fetch_result
 
+Logger = Callable[[str], None]
+CancelCheck = Callable[[], bool]
+LogFn = Callable[[Logger | None, str], None]
 
-def register_response_capture(page, capture_response_payload_fn) -> tuple[list[Any], Callable[[], None]]:
+
+def register_response_capture(
+    page: Any, capture_response_payload_fn: Callable[..., Any]
+) -> tuple[list[Any], Callable[[], None]]:
     captures: list[Any] = []
 
-    def handle_response(response) -> None:
+    def handle_response(response: Any) -> None:
         capture = capture_response_payload_fn(response)
         if capture is not None:
             captures.append(capture)
@@ -124,13 +130,13 @@ def extract_deadline_from_captures(captures: list[Any]) -> str:
 
 
 def open_feedback_page(
-    page,
+    page: Any,
     *,
     account: AccountConfig,
-    logger: callable | None,
-    build_feedback_url_fn,
-    wait_for_iframe_ready_fn,
-    is_cancelled: callable | None = None,
+    logger: Logger | None,
+    build_feedback_url_fn: Callable[[str], str],
+    wait_for_iframe_ready_fn: Callable[..., bool],
+    is_cancelled: CancelCheck | None = None,
 ) -> str:
     feedback_url = build_feedback_url_fn(page.url)
     page.goto(feedback_url, wait_until="domcontentloaded", timeout=60000)
@@ -138,7 +144,13 @@ def open_feedback_page(
     return feedback_url
 
 
-def resolve_frame_locator(page, *, output_dir: Path, business_iframe_selector_fn, safe_page_content_fn):
+def resolve_frame_locator(
+    page: Any,
+    *,
+    output_dir: Path,
+    business_iframe_selector_fn: Callable[..., str],
+    safe_page_content_fn: Callable[..., str],
+) -> Any:
     iframe_selector = business_iframe_selector_fn(page)
     if not iframe_selector:
         html = safe_page_content_fn(page)
@@ -181,15 +193,15 @@ def captures_indicate_non_empty_refunds(captures: list[Any]) -> bool:
 
 def confirm_empty_refund_list(
     *,
-    page,
-    frame_locator,
+    page: Any,
+    frame_locator: Any,
     initial_text: str,
     captures: list[Any],
-    is_empty_refund_list_fn,
-    has_pending_refund_signal_fn,
-    captures_indicate_non_empty_refunds_fn,
-    is_cancelled: callable | None = None,
-    wait_or_cancel_fn,
+    is_empty_refund_list_fn: Callable[[str], bool],
+    has_pending_refund_signal_fn: Callable[[str], bool],
+    captures_indicate_non_empty_refunds_fn: Callable[[list[Any]], bool],
+    is_cancelled: CancelCheck | None = None,
+    wait_or_cancel_fn: Callable[..., Any],
     retries: int = 6,
     interval_ms: int = 1500,
 ) -> tuple[bool, str]:
@@ -219,18 +231,18 @@ def confirm_empty_refund_list(
 
 def build_empty_refund_result(
     *,
-    page,
-    context,
+    page: Any,
+    context: Any,
     account: AccountConfig,
     output_dir: Path,
-    frame_locator,
+    frame_locator: Any,
     list_text: str,
     captures: list[Any],
     feedback_url: str,
     profile_dir: str,
-    logger: callable | None,
-    safe_page_content_fn,
-    extract_current_account_name_fn,
+    logger: Logger | None,
+    safe_page_content_fn: Callable[..., str],
+    extract_current_account_name_fn: Callable[[Any], str],
 ) -> FetchResult:
     actual_account_name = extract_current_account_name_fn(page)
     if profile_dir.strip():
@@ -252,15 +264,15 @@ def build_empty_refund_result(
 
 def confirm_detail_deadline(
     *,
-    page,
-    frame_locator,
+    page: Any,
+    frame_locator: Any,
     captures: list[Any],
     feedback_url: str,
-    extract_labeled_datetime_fn,
-    fallback_from_responses_fn,
-    filter_detail_captures_fn,
-    wait_or_cancel_fn,
-    is_cancelled: callable | None = None,
+    extract_labeled_datetime_fn: Callable[[str, str], str],
+    fallback_from_responses_fn: Callable[[list[Any]], str],
+    filter_detail_captures_fn: Callable[[list[Any], str], list[Any]],
+    wait_or_cancel_fn: Callable[..., Any],
+    is_cancelled: CancelCheck | None = None,
     retries: int = 8,
     interval_ms: int = 1500,
 ) -> tuple[str, str, str]:
@@ -291,19 +303,19 @@ def confirm_detail_deadline(
 
 def build_detail_result(
     *,
-    page,
-    context,
+    page: Any,
+    context: Any,
     account: AccountConfig,
     output_dir: Path,
-    frame_locator,
+    frame_locator: Any,
     captures: list[Any],
     feedback_url: str,
     profile_dir: str,
-    logger: callable | None,
-    safe_page_content_fn,
-    extract_current_account_name_fn,
-    confirm_detail_deadline_fn,
-    is_cancelled: callable | None = None,
+    logger: Logger | None,
+    safe_page_content_fn: Callable[..., str],
+    extract_current_account_name_fn: Callable[[Any], str],
+    confirm_detail_deadline_fn: Callable[..., tuple[str, str, str]],
+    is_cancelled: CancelCheck | None = None,
 ) -> FetchResult:
     action_locator = frame_locator.get_by_text("处理", exact=True)
     detail_capture_start = 0
@@ -347,6 +359,6 @@ def build_detail_result(
     return result
 
 
-def _log(logger: callable | None, message: str) -> None:
+def _log(logger: Logger | None, message: str) -> None:
     if logger:
         logger(message)

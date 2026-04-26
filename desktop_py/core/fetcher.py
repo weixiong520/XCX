@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 from playwright.sync_api import Locator, Page
 
@@ -102,8 +104,12 @@ __all__ = [
     *PUBLIC_FETCHER_API,
 ]
 
+Logger = Callable[[str], None]
+CancelCheck = Callable[[], bool]
+Progress = Callable[[FetchResult], None]
 
-def _run_blocking_fetch_call(func):
+
+def _run_blocking_fetch_call[T](func: Callable[[], T]) -> T:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -120,9 +126,10 @@ def _run_blocking_fetch_call(func):
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
     thread.join()
-    if "error" in outcome:
-        raise outcome["error"]  # type: ignore[misc]
-    return outcome.get("result")
+    error = outcome.get("error")
+    if isinstance(error, BaseException):
+        raise error
+    return cast(T, outcome.get("result"))
 
 
 def find_switch_entry(page: Page) -> Locator | None:
@@ -141,7 +148,7 @@ def wait_for_current_account_name(
     page: Page,
     expected_name: str,
     timeout_ms: int = 5000,
-    is_cancelled: callable | None = None,
+    is_cancelled: CancelCheck | None = None,
 ) -> str:
     return wait_for_current_account_name_impl(
         page,
@@ -156,7 +163,7 @@ def should_retry_switch_from_home(current_url: str, home_url: str, has_switch_en
     return should_retry_switch_from_home_impl(current_url, home_url, has_switch_entry)
 
 
-def prepare_switch_account_page(page: Page, home_url: str = "", logger: callable | None = None) -> None:
+def prepare_switch_account_page(page: Page, home_url: str = "", logger: Logger | None = None) -> None:
     prepare_switch_account_page_impl(
         page,
         home_url,
@@ -187,8 +194,8 @@ def extract_current_account_name(page: Page) -> str:
 def save_login_state(
     account: AccountConfig,
     wait_seconds: int,
-    logger: callable | None = None,
-    is_cancelled: callable | None = None,
+    logger: Logger | None = None,
+    is_cancelled: CancelCheck | None = None,
 ) -> str:
     return _run_blocking_fetch_call(
         lambda: save_login_state_impl(
@@ -210,8 +217,8 @@ def save_login_state_with_profile(
     account: AccountConfig,
     wait_seconds: int,
     profile_dir: str,
-    logger: callable | None = None,
-    is_cancelled: callable | None = None,
+    logger: Logger | None = None,
+    is_cancelled: CancelCheck | None = None,
 ) -> str:
     return _run_blocking_fetch_call(
         lambda: save_login_state_with_profile_impl(
@@ -231,7 +238,7 @@ def save_login_state_with_profile(
     )
 
 
-def switch_to_account(page: Page, account_name: str, home_url: str = "", logger: callable | None = None) -> None:
+def switch_to_account(page: Page, account_name: str, home_url: str = "", logger: Logger | None = None) -> None:
     switch_to_account_impl(
         page,
         account_name,
@@ -263,7 +270,7 @@ def should_switch_for_account(account: AccountConfig, current_account_name: str)
     return should_switch_for_account_impl(account, current_account_name)
 
 
-def list_switchable_accounts(page: Page, home_url: str = "", logger: callable | None = None) -> list[str]:
+def list_switchable_accounts(page: Page, home_url: str = "", logger: Logger | None = None) -> list[str]:
     return list_switchable_accounts_impl(
         page,
         home_url,
@@ -274,17 +281,17 @@ def list_switchable_accounts(page: Page, home_url: str = "", logger: callable | 
     )
 
 
-def _wait_for_locator_items(page: Page, locator, timeout_ms: int = 1800, interval_ms: int = 200) -> bool:
+def _wait_for_locator_items(page: Page, locator: Locator, timeout_ms: int = 1800, interval_ms: int = 200) -> bool:
     return wait_for_locator_items_impl(page, locator, timeout_ms=timeout_ms, interval_ms=interval_ms)
 
 
 def wait_for_switch_account_items(
     page: Page,
     selector: str,
-    logger: callable | None = None,
+    logger: Logger | None = None,
     retry_limit: int = SWITCH_ACCOUNT_LIST_RETRY_LIMIT,
-    is_cancelled: callable | None = None,
-):
+    is_cancelled: CancelCheck | None = None,
+) -> Locator:
     return wait_for_switch_account_items_impl(
         page,
         selector,
@@ -301,7 +308,7 @@ def wait_for_switch_account_items(
 def fetch_switchable_accounts(
     account: AccountConfig,
     headless: bool = True,
-    logger: callable | None = None,
+    logger: Logger | None = None,
     profile_dir: str = "",
 ) -> list[str]:
     names = fetch_switchable_accounts_impl(
@@ -327,12 +334,12 @@ def resolve_bootstrap_url(account: AccountConfig, output_dir: Path) -> str:
 
 
 def _fetch_account_in_page(
-    page,
-    context,
+    page: Any,
+    context: Any,
     account: AccountConfig,
-    logger: callable | None = None,
+    logger: Logger | None = None,
     profile_dir: str = "",
-    is_cancelled: callable | None = None,
+    is_cancelled: CancelCheck | None = None,
 ) -> FetchResult:
     return fetch_account_in_page_impl(
         page,
@@ -382,9 +389,9 @@ def fetch_account(
     account: AccountConfig,
     wait_seconds: int,
     headless: bool = True,
-    logger: callable | None = None,
+    logger: Logger | None = None,
     profile_dir: str = "",
-    is_cancelled: callable | None = None,
+    is_cancelled: CancelCheck | None = None,
 ) -> FetchResult:
     return fetch_account_impl(
         account,
@@ -440,10 +447,10 @@ def fetch_account(
 def fetch_accounts_batch(
     accounts: list[AccountConfig],
     headless: bool = True,
-    logger: callable | None = None,
-    progress: callable | None = None,
+    logger: Logger | None = None,
+    progress: Progress | None = None,
     profile_dir: str = "",
-    is_cancelled: callable | None = None,
+    is_cancelled: CancelCheck | None = None,
 ) -> list[FetchResult]:
     return fetch_accounts_batch_impl(
         accounts,
@@ -495,7 +502,7 @@ def fetch_accounts_batch(
     )
 
 
-def validate_account_state(account: AccountConfig, logger: callable | None = None, profile_dir: str = "") -> bool:
+def validate_account_state(account: AccountConfig, logger: Logger | None = None, profile_dir: str = "") -> bool:
     return _run_blocking_fetch_call(
         lambda: validate_account_state_impl(
             account,
@@ -515,7 +522,7 @@ def validate_account_state(account: AccountConfig, logger: callable | None = Non
 
 def renew_account_state(
     account: AccountConfig,
-    logger: callable | None = None,
+    logger: Logger | None = None,
     profile_dir: str = "",
     headless: bool = True,
 ) -> bool:

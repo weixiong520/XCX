@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
@@ -38,6 +40,10 @@ BACKEND_SESSION_CONTENT_KEYWORDS = (
 )
 SESSION_STALE_AFTER = timedelta(days=3)
 SESSION_TIME_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M")
+
+Logger = Callable[[str], None]
+CancelCheck = Callable[[], bool]
+LogFn = Callable[[Logger | None, str], None]
 
 
 @dataclass(frozen=True)
@@ -114,7 +120,11 @@ def mark_account_session_missing(account: AccountConfig, *, profile_dir: str = "
     account.last_session_error = reason.strip()
 
 
-def _has_backend_session_url(page) -> bool:
+def _wait_for_timeout(current_page: Any, wait_ms: int, _cancelled: CancelCheck | None = None) -> None:
+    current_page.wait_for_timeout(wait_ms)
+
+
+def _has_backend_session_url(page: Any) -> bool:
     return any(keyword in str(getattr(page, "url", "") or "") for keyword in BACKEND_SESSION_URL_KEYWORDS)
 
 
@@ -128,14 +138,14 @@ def _extract_account_name_from_html(html: str) -> str:
     return matched.group(1).strip()
 
 
-def _locator_count(page, selector: str, **kwargs) -> int:
+def _locator_count(page: Any, selector: str, **kwargs: Any) -> int:
     try:
         return int(page.locator(selector, **kwargs).count())
     except Exception:
         return 0
 
 
-def _has_backend_session_locator(page) -> bool:
+def _has_backend_session_locator(page: Any) -> bool:
     if not callable(getattr(page, "locator", None)):
         return False
     if _locator_count(page, ".switch_account_dialog .account_item") > 0:
@@ -147,12 +157,12 @@ def _has_backend_session_locator(page) -> bool:
     if _locator_count(page, "[title='切换账号']") > 0:
         return True
     try:
-        return page.get_by_text("切换账号", exact=True).count() > 0
+        return bool(page.get_by_text("切换账号", exact=True).count() > 0)
     except Exception:
         return False
 
 
-def _has_backend_session_content(page) -> bool:
+def _has_backend_session_content(page: Any) -> bool:
     if not callable(getattr(page, "content", None)):
         return False
     if is_login_timeout_page(page, safe_page_content_fn=safe_page_content):
@@ -164,7 +174,7 @@ def _has_backend_session_content(page) -> bool:
     return any(keyword in html for keyword in BACKEND_SESSION_CONTENT_KEYWORDS)
 
 
-def verify_backend_session(page, account: AccountConfig | None = None) -> SessionVerification:
+def verify_backend_session(page: Any, account: AccountConfig | None = None) -> SessionVerification:
     if is_login_timeout_page(page, safe_page_content_fn=safe_page_content):
         return SessionVerification(
             False,
@@ -221,11 +231,16 @@ def verify_backend_session(page, account: AccountConfig | None = None) -> Sessio
     )
 
 
-def _has_backend_session(page) -> bool:
+def _has_backend_session(page: Any) -> bool:
     return verify_backend_session(page).valid
 
 
-def _wait_for_backend_session(page, *, wait_for_url_contains_fn, timeout_ms: int) -> bool:
+def _wait_for_backend_session(
+    page: Any,
+    *,
+    wait_for_url_contains_fn: Callable[..., Any],
+    timeout_ms: int,
+) -> bool:
     try:
         wait_for_url_contains_fn(page, BACKEND_SESSION_URL_KEYWORDS, timeout_ms=timeout_ms)
     except PlaywrightTimeoutError:
@@ -233,14 +248,20 @@ def _wait_for_backend_session(page, *, wait_for_url_contains_fn, timeout_ms: int
     return _has_backend_session(page)
 
 
-def _probe_account_session_url(page, url: str, *, wait_for_url_contains_fn, timeout_ms: int) -> bool:
+def _probe_account_session_url(
+    page: Any,
+    url: str,
+    *,
+    wait_for_url_contains_fn: Callable[..., Any],
+    timeout_ms: int,
+) -> bool:
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
     except PlaywrightTimeoutError:
         if recover_login_timeout_page(
             page,
             safe_page_content_fn=safe_page_content,
-            wait_or_cancel_fn=lambda current_page, wait_ms, _is_cancelled=None: current_page.wait_for_timeout(wait_ms),
+            wait_or_cancel_fn=_wait_for_timeout,
         ):
             return _wait_for_backend_session(
                 page, wait_for_url_contains_fn=wait_for_url_contains_fn, timeout_ms=timeout_ms
@@ -251,13 +272,19 @@ def _probe_account_session_url(page, url: str, *, wait_for_url_contains_fn, time
     if recover_login_timeout_page(
         page,
         safe_page_content_fn=safe_page_content,
-        wait_or_cancel_fn=lambda current_page, wait_ms, _is_cancelled=None: current_page.wait_for_timeout(wait_ms),
+        wait_or_cancel_fn=_wait_for_timeout,
     ):
         return _wait_for_backend_session(page, wait_for_url_contains_fn=wait_for_url_contains_fn, timeout_ms=timeout_ms)
     return _has_backend_session(page)
 
 
-def _probe_account_session(page, account: AccountConfig, *, wait_for_url_contains_fn, timeout_ms: int) -> bool:
+def _probe_account_session(
+    page: Any,
+    account: AccountConfig,
+    *,
+    wait_for_url_contains_fn: Callable[..., Any],
+    timeout_ms: int,
+) -> bool:
     return _probe_account_session_result(
         page,
         account,
@@ -267,7 +294,11 @@ def _probe_account_session(page, account: AccountConfig, *, wait_for_url_contain
 
 
 def _probe_account_session_result(
-    page, account: AccountConfig, *, wait_for_url_contains_fn, timeout_ms: int
+    page: Any,
+    account: AccountConfig,
+    *,
+    wait_for_url_contains_fn: Callable[..., Any],
+    timeout_ms: int,
 ) -> SessionVerification:
     if not callable(getattr(page, "goto", None)):
         return SessionVerification(
@@ -284,7 +315,12 @@ def _probe_account_session_result(
     return verify_backend_session(page, account)
 
 
-def _create_state_file_context(playwright, account: AccountConfig, headless: bool, _profile_dir: str):
+def _create_state_file_context(
+    playwright: Any,
+    account: AccountConfig,
+    headless: bool,
+    _profile_dir: str,
+) -> tuple[Any, Any]:
     browser = playwright.chromium.launch(headless=headless)
     try:
         context = browser.new_context(storage_state=str(account.state_path), viewport={"width": 1440, "height": 1200})
@@ -296,20 +332,20 @@ def _create_state_file_context(playwright, account: AccountConfig, headless: boo
 
 def _wait_for_login_success(
     account: AccountConfig,
-    page,
-    context,
+    page: Any,
+    context: Any,
     state_path: Path,
     *,
     wait_seconds: int,
-    datetime_cls,
-    is_cancelled,
-    wait_or_cancel_fn,
-    logger=None,
-    log_fn=None,
-    sync_playwright_fn=None,
-    create_browser_context_fn=None,
-    close_page_fn=None,
-    close_context_and_browser_fn=None,
+    datetime_cls: type[datetime],
+    is_cancelled: CancelCheck | None,
+    wait_or_cancel_fn: Callable[..., Any],
+    logger: Logger | None = None,
+    log_fn: LogFn | None = None,
+    sync_playwright_fn: Callable[..., Any] | None = None,
+    create_browser_context_fn: Callable[..., tuple[Any | None, Any]] | None = None,
+    close_page_fn: Callable[[Any], None] | None = None,
+    close_context_and_browser_fn: Callable[..., None] | None = None,
     headless_verify: bool = True,
     profile_dir: str = "",
 ) -> None:
@@ -395,15 +431,15 @@ def _wait_for_login_success(
 def save_login_state_impl(
     account: AccountConfig,
     wait_seconds: int,
-    logger: callable | None = None,
-    is_cancelled: callable | None = None,
+    logger: Logger | None = None,
+    is_cancelled: CancelCheck | None = None,
     *,
-    sync_playwright_fn,
-    datetime_cls,
-    log_fn,
-    wait_or_cancel_fn,
-    close_page_fn,
-    close_context_and_browser_fn,
+    sync_playwright_fn: Callable[..., Any],
+    datetime_cls: type[datetime],
+    log_fn: LogFn,
+    wait_or_cancel_fn: Callable[..., Any],
+    close_page_fn: Callable[[Any], None],
+    close_context_and_browser_fn: Callable[..., None],
 ) -> str:
     state_path = Path(account.state_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -450,16 +486,16 @@ def save_login_state_with_profile_impl(
     account: AccountConfig,
     wait_seconds: int,
     profile_dir: str,
-    logger: callable | None = None,
-    is_cancelled: callable | None = None,
+    logger: Logger | None = None,
+    is_cancelled: CancelCheck | None = None,
     *,
-    sync_playwright_fn,
-    datetime_cls,
-    validate_shared_browser_profile_dir_fn,
-    log_fn,
-    wait_or_cancel_fn,
-    close_page_fn,
-    close_context_and_browser_fn,
+    sync_playwright_fn: Callable[..., Any],
+    datetime_cls: type[datetime],
+    validate_shared_browser_profile_dir_fn: Callable[[str], str],
+    log_fn: LogFn,
+    wait_or_cancel_fn: Callable[..., Any],
+    close_page_fn: Callable[[Any], None],
+    close_context_and_browser_fn: Callable[..., None],
 ) -> str:
     user_data_dir = Path(
         normalize_profile_dir(
@@ -513,17 +549,17 @@ def save_login_state_with_profile_impl(
 
 def validate_account_state_impl(
     account: AccountConfig,
-    logger: callable | None = None,
+    logger: Logger | None = None,
     profile_dir: str = "",
     *,
-    sync_playwright_fn,
-    path_exists_fn,
-    validate_shared_browser_profile_dir_fn,
-    create_browser_context_fn,
-    wait_for_url_contains_fn,
-    close_page_fn,
-    close_context_and_browser_fn,
-    log_fn,
+    sync_playwright_fn: Callable[..., Any],
+    path_exists_fn: Callable[..., bool],
+    validate_shared_browser_profile_dir_fn: Callable[[str], str],
+    create_browser_context_fn: Callable[..., tuple[Any | None, Any]],
+    wait_for_url_contains_fn: Callable[..., Any],
+    close_page_fn: Callable[[Any], None],
+    close_context_and_browser_fn: Callable[..., None],
+    log_fn: LogFn,
 ) -> bool:
     normalized_profile_dir = normalize_profile_dir(
         profile_dir,
@@ -585,19 +621,19 @@ def validate_account_state_impl(
 
 def renew_account_state_impl(
     account: AccountConfig,
-    logger: callable | None = None,
+    logger: Logger | None = None,
     profile_dir: str = "",
     headless: bool = True,
     *,
-    sync_playwright_fn,
-    path_exists_fn,
-    validate_shared_browser_profile_dir_fn,
-    create_browser_context_fn,
-    wait_for_url_contains_fn,
-    wait_or_cancel_fn,
-    close_page_fn,
-    close_context_and_browser_fn,
-    log_fn,
+    sync_playwright_fn: Callable[..., Any],
+    path_exists_fn: Callable[..., bool],
+    validate_shared_browser_profile_dir_fn: Callable[[str], str],
+    create_browser_context_fn: Callable[..., tuple[Any | None, Any]],
+    wait_for_url_contains_fn: Callable[..., Any],
+    wait_or_cancel_fn: Callable[..., Any],
+    close_page_fn: Callable[[Any], None],
+    close_context_and_browser_fn: Callable[..., None],
+    log_fn: LogFn,
 ) -> bool:
     log_fn(logger, f"开始自动续期账号 {account.name}。")
     normalized_profile_dir = normalize_profile_dir(

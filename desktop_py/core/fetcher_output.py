@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from typing import Any
 
 from desktop_py.core.fetcher_support import persist_storage_state as persist_storage_state_impl
 from desktop_py.core.store import write_account_output_json, write_account_output_text
 
 
-def _redact_output_value(value):
+def _redact_output_value(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _redact_output_value(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -22,7 +24,7 @@ def write_fetch_artifacts(
     page_html: str = "",
     frame_html: str = "",
     frame_text: str = "",
-    captures: list | None = None,
+    captures: list[Any] | None = None,
 ) -> None:
     if page_html:
         write_account_output_text(account_name, "page.html", page_html)
@@ -35,14 +37,14 @@ def write_fetch_artifacts(
 
 
 def persist_storage_state(
-    context,
+    context: Any,
     state_path: str,
     *,
-    page=None,
-    logger: callable | None = None,
-    log_fn=None,
-    wait_or_cancel_fn=None,
-    is_cancelled=None,
+    page: Any = None,
+    logger: Callable[[str], None] | None = None,
+    log_fn: Callable[..., Any] | None = None,
+    wait_or_cancel_fn: Callable[..., Any] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> None:
     kwargs = {
         "page": page,

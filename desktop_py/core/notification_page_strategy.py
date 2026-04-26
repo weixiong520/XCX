@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 from desktop_py.core.fetcher_support import (
     FetchError,
     is_login_timeout_page,
     recover_login_timeout_page,
 )
+from desktop_py.core.models import AccountConfig
 from desktop_py.core.store import write_account_output_json, write_account_output_text
 
 NOTIFICATION_CENTER_URL_KEYWORD = "/wxamp/tools/wasysnotify"
@@ -20,8 +22,16 @@ TARGET_NOTIFICATION_RULES = {
     "copyright_complaint": "你的账号收到一条侵权投诉",
 }
 
+Logger = Callable[[str], None]
+CancelCheck = Callable[[], bool]
+LogFn = Callable[[Logger | None, str], None]
 
-def collect_notification_items(page) -> list[dict[str, Any]]:
+
+def _wait_for_timeout(current_page: Any, wait_ms: int, _cancelled: CancelCheck | None = None) -> None:
+    current_page.wait_for_timeout(wait_ms)
+
+
+def collect_notification_items(page: Any) -> list[dict[str, Any]]:
     locator = page.locator(NOTIFICATION_ITEM_SELECTOR)
     if locator.count() == 0:
         return []
@@ -36,7 +46,7 @@ def collect_notification_items(page) -> list[dict[str, Any]]:
         }))
         """
     )
-    return [item for item in items if isinstance(item, dict)]
+    return [cast(dict[str, Any], item) for item in items if isinstance(item, dict)]
 
 
 def filter_target_unread_notifications(items: list[dict[str, Any]], account_name: str) -> list[dict[str, Any]]:
@@ -69,20 +79,20 @@ def filter_target_unread_notifications(items: list[dict[str, Any]], account_name
 def build_notification_summary(notifications: list[dict[str, Any]]) -> str:
     if not notifications:
         return "通知中心无目标未读消息。"
-    titles = "、".join(item["title"] for item in notifications[:3] if item.get("title"))
+    titles = "、".join(str(item["title"]) for item in notifications[:3] if item.get("title"))
     suffix = " 等" if len(notifications) > 3 else ""
     return f"通知中心未读消息 {len(notifications)} 条：{titles}{suffix}"
 
 
 def open_notification_center(
-    page,
+    page: Any,
     *,
-    account,
-    logger: Callable[[str], None] | None,
-    log_fn,
-    wait_for_url_contains_fn,
-    safe_page_content_fn,
-    is_cancelled: callable | None = None,
+    account: AccountConfig,
+    logger: Logger | None,
+    log_fn: LogFn,
+    wait_for_url_contains_fn: Callable[..., Any],
+    safe_page_content_fn: Callable[..., str],
+    is_cancelled: CancelCheck | None = None,
 ) -> None:
     page.goto(account.home_url, wait_until="domcontentloaded", timeout=60000)
     wait_for_url_contains_fn(page, ("token=", "/wxamp/index/index"), timeout_ms=4000, is_cancelled=is_cancelled)
@@ -92,7 +102,7 @@ def open_notification_center(
             logger=logger,
             log_fn=log_fn,
             safe_page_content_fn=safe_page_content_fn,
-            wait_or_cancel_fn=lambda current_page, wait_ms, cancelled=None: current_page.wait_for_timeout(wait_ms),
+            wait_or_cancel_fn=_wait_for_timeout,
             is_cancelled=is_cancelled,
         )
         wait_for_url_contains_fn(page, ("token=", "/wxamp/index/index"), timeout_ms=4000, is_cancelled=is_cancelled)
@@ -113,15 +123,15 @@ def open_notification_center(
 
 
 def fetch_notifications(
-    page,
+    page: Any,
     *,
-    account,
-    logger: Callable[[str], None] | None,
-    output_dir,
-    log_fn,
-    wait_for_url_contains_fn,
-    safe_page_content_fn,
-    is_cancelled: callable | None = None,
+    account: AccountConfig,
+    logger: Logger | None,
+    output_dir: Path,
+    log_fn: LogFn,
+    wait_for_url_contains_fn: Callable[..., Any],
+    safe_page_content_fn: Callable[..., str],
+    is_cancelled: CancelCheck | None = None,
 ) -> dict[str, Any]:
     try:
         open_notification_center(
