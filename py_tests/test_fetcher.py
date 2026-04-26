@@ -33,8 +33,8 @@ from desktop_py.core.fetcher_support import (
     classify_refund_response_type,
     extract_response_token,
     is_login_timeout_page,
-    recover_login_timeout_page,
     persist_storage_state,
+    recover_login_timeout_page,
     safe_page_content,
     wait_for_iframe_ready,
     wait_for_url_contains,
@@ -1014,7 +1014,9 @@ class FetcherTestCase(unittest.TestCase):
         self.assertTrue(all(page.closed for page in created_pages))
 
     def test_fetch_accounts_batch_rebuilds_runtime_every_five_accounts(self):
-        accounts = [AccountConfig(name=f"账号{i}", state_path="storage/a.json", is_entry_account=False) for i in range(6)]
+        accounts = [
+            AccountConfig(name=f"账号{i}", state_path="storage/a.json", is_entry_account=False) for i in range(6)
+        ]
         created_pages = []
 
         class FakePageObject:

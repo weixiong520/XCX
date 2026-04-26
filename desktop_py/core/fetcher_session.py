@@ -195,8 +195,10 @@ def verify_backend_session(page, account: AccountConfig | None = None) -> Sessio
             feedback_url=feedback_url,
             reason="后台账号信息校验通过",
         )
-    if _has_backend_session_url(page) and not callable(getattr(page, "content", None)) and not callable(
-        getattr(page, "locator", None)
+    if (
+        _has_backend_session_url(page)
+        and not callable(getattr(page, "content", None))
+        and not callable(getattr(page, "locator", None))
     ):
         return SessionVerification(
             True,
@@ -323,7 +325,9 @@ def _wait_for_login_success(
             enabled=account.enabled,
         )
         with sync_playwright_fn() as verify_playwright:
-            verify_browser, verify_context = create_browser_context_fn(verify_playwright, temp_account, headless_verify, "")
+            verify_browser, verify_context = create_browser_context_fn(
+                verify_playwright, temp_account, headless_verify, ""
+            )
             verify_page = verify_context.new_page()
             try:
                 result = _probe_account_session_result(

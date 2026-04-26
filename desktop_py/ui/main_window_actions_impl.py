@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import random
 
+from desktop_py.core.models import SESSION_STATUS_STALE, SESSION_STATUS_VALID
 from desktop_py.core.session_links import (
     normalize_group_feedback_urls,
     propagate_account_feedback_url,
@@ -162,7 +163,7 @@ def save_current_settings(
     app_settings_cls,
     validate_shared_browser_profile_dir_fn,
     save_settings_fn,
-    ) -> None:
+) -> None:
     try:
         browser_profile_dir = validate_shared_browser_profile_dir_fn(window.profile_dir_edit.text().strip())
         window.settings = app_settings_cls(
@@ -426,7 +427,9 @@ def renew_selected(window, *, renew_account_state_fn) -> None:
 def mark_validation(window, account, valid: bool, *, save_accounts_fn) -> None:
     account.last_status = "登录有效" if valid else "登录失效"
     if valid:
-        account.last_note = "可直接抓取" if account.session_status != SESSION_STATUS_STALE else "登录态接近失效，建议优先续期"
+        account.last_note = (
+            "可直接抓取" if account.session_status != SESSION_STATUS_STALE else "登录态接近失效，建议优先续期"
+        )
     else:
         account.last_note = account.last_session_error or "请重新保存登录态"
     if valid:
@@ -553,7 +556,9 @@ def run_auto_renew(window, *, renew_account_state_fn) -> None:
 
 def mark_auto_renew_result(window, account, valid: bool, *, save_accounts_fn) -> None:
     account.last_status = "登录有效" if valid else "登录失效"
-    account.last_note = "自动续期成功，可直接抓取" if valid else (account.last_session_error or "自动续期失败，请重新保存登录态")
+    account.last_note = (
+        "自动续期成功，可直接抓取" if valid else (account.last_session_error or "自动续期失败，请重新保存登录态")
+    )
     save_accounts_fn(window.accounts)
     window.refresh_table()
 
