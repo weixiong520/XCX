@@ -33,10 +33,12 @@ class BrowserRuntimeTestCase(unittest.TestCase):
     def test_playwright_browsers_ready_checks_required_directories(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "chromium-1208" / "chrome-win").mkdir(parents=True)
-            (root / "chromium-1208" / "chrome-win" / "chrome.exe").write_text("", encoding="utf-8")
-            (root / "chromium_headless_shell-1208" / "chrome-win").mkdir(parents=True)
-            (root / "chromium_headless_shell-1208" / "chrome-win" / "headless_shell.exe").write_text(
+            (root / "chromium-1208" / "chrome-win64").mkdir(parents=True)
+            (root / "chromium-1208" / "chrome-win64" / "chrome.exe").write_text("", encoding="utf-8")
+            (root / "chromium_headless_shell-1208" / "chrome-headless-shell-win64").mkdir(parents=True)
+            (
+                root / "chromium_headless_shell-1208" / "chrome-headless-shell-win64" / "chrome-headless-shell.exe"
+            ).write_text(
                 "",
                 encoding="utf-8",
             )

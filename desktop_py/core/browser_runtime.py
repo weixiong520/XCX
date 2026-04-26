@@ -63,12 +63,14 @@ def _browser_executable_candidates(path: Path) -> list[Path]:
     name = path.name
     if name.startswith("chromium_headless_shell-"):
         return [
+            path / "chrome-headless-shell-win64" / "chrome-headless-shell.exe",
             path / "chrome-win" / "headless_shell.exe",
             path / "chrome-linux" / "headless_shell",
             path / "chrome-mac" / "headless_shell",
         ]
     if name.startswith("chromium-"):
         return [
+            path / "chrome-win64" / "chrome.exe",
             path / "chrome-win" / "chrome.exe",
             path / "chrome-linux" / "chrome",
             path / "chrome-mac" / "Chromium.app" / "Contents" / "MacOS" / "Chromium",
