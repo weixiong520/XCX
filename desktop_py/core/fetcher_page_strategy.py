@@ -245,8 +245,7 @@ def build_empty_refund_result(
     extract_current_account_name_fn: Callable[[Any], str],
 ) -> FetchResult:
     actual_account_name = extract_current_account_name_fn(page)
-    if profile_dir.strip():
-        persist_storage_state(context, account.state_path, page=page, logger=logger, log_fn=_log)
+    persist_storage_state(context, account.state_path, page=page, logger=logger, log_fn=_log)
     result = FetchResult(
         account_name=account.name,
         ok=True,
@@ -342,8 +341,7 @@ def build_detail_result(
         )
         raise FetchError("未在详情页文本中提取到处理截止时间。")
 
-    if profile_dir.strip():
-        persist_storage_state(context, account.state_path, page=page, logger=logger, log_fn=_log)
+    persist_storage_state(context, account.state_path, page=page, logger=logger, log_fn=_log)
     result = FetchResult(
         account_name=account.name,
         ok=True,

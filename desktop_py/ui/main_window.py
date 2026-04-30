@@ -503,7 +503,11 @@ class MainWindow(QMainWindow):
         validate_selected_impl(self, validate_account_state_fn=validate_account_state)
 
     def renew_selected(self) -> None:
-        renew_selected_impl(self, renew_account_state_fn=renew_account_state)
+        renew_selected_impl(
+            self,
+            renew_account_state_fn=renew_account_state,
+            close_all_group_runtimes_fn=close_all_group_runtimes,
+        )
 
     def _mark_validation(self, account: AccountConfig, valid: bool) -> None:
         mark_validation_impl(self, account, valid, save_accounts_fn=save_accounts)
@@ -550,6 +554,7 @@ class MainWindow(QMainWindow):
                 profile_dir,
                 headless,
             ),
+            close_all_group_runtimes_fn=close_all_group_runtimes,
         )
 
     def _mark_auto_renew_result(self, account: AccountConfig, valid: bool) -> None:

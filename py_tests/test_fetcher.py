@@ -955,7 +955,13 @@ class FetcherTestCase(unittest.TestCase):
             mock_playwright.return_value.__enter__.return_value = object()
             for _ in range(2):
                 fake_context = type(
-                    "FakeContext", (), {"new_page": lambda self: object(), "close": lambda self: None}
+                    "FakeContext",
+                    (),
+                    {
+                        "new_page": lambda self: object(),
+                        "storage_state": lambda self, path=None, indexed_db=False: None,
+                        "close": lambda self: None,
+                    },
                 )()
                 fake_browser = type("FakeBrowser", (), {"close": lambda self: None})()
                 contexts.append((fake_browser, fake_context))
@@ -986,6 +992,9 @@ class FetcherTestCase(unittest.TestCase):
                 page = FakePageObject()
                 created_pages.append(page)
                 return page
+
+            def storage_state(self, path=None, indexed_db=False):
+                return None
 
             def close(self):
                 return None
@@ -1031,6 +1040,9 @@ class FetcherTestCase(unittest.TestCase):
                 page = FakePageObject()
                 created_pages.append(page)
                 return page
+
+            def storage_state(self, path=None, indexed_db=False):
+                return None
 
             def close(self):
                 return None
@@ -1082,6 +1094,9 @@ class FetcherTestCase(unittest.TestCase):
                 created_pages.append(page)
                 return page
 
+            def storage_state(self, path=None, indexed_db=False):
+                return None
+
             def close(self):
                 return None
 
@@ -1132,6 +1147,9 @@ class FetcherTestCase(unittest.TestCase):
                 page = FakePageObject()
                 created_pages.append(page)
                 return page
+
+            def storage_state(self, path=None, indexed_db=False):
+                return None
 
             def close(self):
                 return None
@@ -2066,14 +2084,22 @@ class FetcherTestCase(unittest.TestCase):
             def get_by_text(self, text, exact=False):
                 return ActionLocator()
 
+        class FakeContext:
+            def __init__(self):
+                self.storage_state_calls: list[tuple[str | None, bool]] = []
+
+            def storage_state(self, path=None, indexed_db=False):
+                self.storage_state_calls.append((path, indexed_db))
+
         def fake_confirm_detail_deadline(**kwargs):
             seen_captures.append(list(kwargs["captures"]))
             return _fallback_from_responses(kwargs["captures"]), "detail text", "<div>detail</div>"
 
+        context = FakeContext()
         with TemporaryDirectory() as temp_dir:
             result = build_detail_result(
                 page=object(),
-                context=object(),
+                context=context,
                 account=AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False),
                 output_dir=Path(temp_dir),
                 frame_locator=FrameLocator(),
@@ -2093,6 +2119,45 @@ class FetcherTestCase(unittest.TestCase):
             _fallback_from_responses(seen_captures[0]),
             "2026-04-27 08:37:32",
         )
+        self.assertEqual(context.storage_state_calls, [("storage\\a.json", True)])
+
+    def test_build_empty_refund_result_persists_regular_state_file(self):
+        from desktop_py.core.fetcher_page_strategy import build_empty_refund_result
+
+        class FakeContext:
+            def __init__(self):
+                self.storage_state_calls: list[tuple[str | None, bool]] = []
+
+            def storage_state(self, path=None, indexed_db=False):
+                self.storage_state_calls.append((path, indexed_db))
+
+        class FakeBodyLocator:
+            def text_content(self, timeout=None):
+                return "暂无内容"
+
+        class FakeFrameLocator:
+            def locator(self, selector):
+                return FakeBodyLocator()
+
+        context = FakeContext()
+        with TemporaryDirectory() as temp_dir:
+            result = build_empty_refund_result(
+                page=object(),
+                context=context,
+                account=AccountConfig(name="账号A", state_path="storage/a.json", is_entry_account=False),
+                output_dir=Path(temp_dir),
+                frame_locator=FakeFrameLocator(),
+                list_text="暂无内容",
+                captures=[],
+                feedback_url="https://mp.weixin.qq.com/wxamp/frame/pluginRedirect/gameFeedback?token=current",
+                profile_dir="",
+                logger=None,
+                safe_page_content_fn=lambda _page: "<html></html>",
+                extract_current_account_name_fn=lambda _page: "账号A",
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(context.storage_state_calls, [("storage\\a.json", True)])
 
     def test_close_context_and_browser_still_closes_browser_when_context_close_fails(self):
         calls: list[str] = []
@@ -3061,6 +3126,9 @@ class FetcherTestCase(unittest.TestCase):
         class FakeContext:
             def new_page(self):
                 return FakePageObject()
+
+            def storage_state(self, path=None, indexed_db=False):
+                return None
 
             def close(self):
                 return None

@@ -1,5 +1,6 @@
 import threading
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from desktop_py.core.fetcher_runtime import (
@@ -29,9 +30,13 @@ class FakePage:
 class FakeContext:
     def __init__(self):
         self.page = FakePage()
+        self.storage_state_calls: list[tuple[str | None, bool]] = []
 
     def new_page(self):
         return self.page
+
+    def storage_state(self, path=None, indexed_db=False):
+        self.storage_state_calls.append((path, indexed_db))
 
     def close(self):
         return None
@@ -163,6 +168,42 @@ class FetcherRuntimeTestCase(unittest.TestCase):
 
         self.assertEqual(runtime.group_key, "storage/a.json")
         self.assertEqual(calls, 2)
+
+    def test_close_all_group_runtimes_persists_regular_state_file(self):
+        account = AccountConfig(name="账号A", state_path="storage/a.json")
+        context = FakeContext()
+
+        runtime = acquire_group_runtime(
+            account,
+            headless=True,
+            profile_dir="",
+            sync_playwright_fn=sync_playwright_fn,
+            create_browser_context_fn=lambda *_args: (FakeBrowser(), context),
+        )
+        self.assertEqual(runtime.state_path, Path(account.state_path))
+        self.assertTrue(runtime.persist_state)
+
+        close_all_group_runtimes()
+
+        self.assertEqual(context.storage_state_calls, [("storage\\a.json", True)])
+
+    def test_close_all_group_runtimes_persists_shared_profile_state_file(self):
+        account = AccountConfig(name="账号A", state_path="storage/a.json")
+        context = FakeContext()
+
+        runtime = acquire_group_runtime(
+            account,
+            headless=True,
+            profile_dir="C:/profile",
+            sync_playwright_fn=sync_playwright_fn,
+            create_browser_context_fn=lambda *_args: (None, context),
+        )
+        self.assertEqual(runtime.state_path, Path(account.state_path))
+        self.assertTrue(runtime.persist_state)
+
+        close_all_group_runtimes()
+
+        self.assertEqual(context.storage_state_calls, [("storage\\a.json", True)])
 
 
 if __name__ == "__main__":

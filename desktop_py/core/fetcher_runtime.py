@@ -88,7 +88,7 @@ def _create_runtime(
     try:
         browser, context = create_browser_context_fn(playwright, account, headless, profile_dir)
         page = context.new_page()
-        state_path = Path(account.state_path) if profile_dir.strip() else None
+        state_path = Path(account.state_path) if account.state_path.strip() else None
         runtime = GroupRuntime(
             group_key=runtime_group_key(account, profile_dir),
             sync_manager=sync_manager,
@@ -98,7 +98,7 @@ def _create_runtime(
             page=page,
             profile_dir=profile_dir,
             state_path=state_path,
-            persist_state=bool(profile_dir.strip()),
+            persist_state=state_path is not None,
         )
         try:
             setattr(page, "_current_account_name_cache", "")

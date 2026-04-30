@@ -1124,7 +1124,31 @@ class UiSmokeTestCase(unittest.TestCase):
             job = mock_run_thread.call_args.args[0]
             with patch("desktop_py.ui.main_window.renew_account_state", return_value=True) as mock_renew:
                 self.assertTrue(job(lambda _message: None))
-            self.assertEqual(mock_renew.call_args.args[0].name, "主账号")
+                self.assertEqual(mock_renew.call_args.args[0].name, "主账号")
+
+    def test_run_auto_renew_closes_group_runtime_before_renew(self):
+        with patch.dict(os.environ, {"QT_QPA_PLATFORM": "windows"}):
+            window = MainWindow()
+            self.addCleanup(window.close)
+            window.accounts = [
+                AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
+            ]
+            calls: list[str] = []
+
+            with (
+                patch("desktop_py.ui.main_window.close_all_group_runtimes", side_effect=lambda: calls.append("close")),
+                patch(
+                    "desktop_py.ui.main_window.renew_account_state",
+                    side_effect=lambda *_args: calls.append("renew") or True,
+                ),
+                patch.object(window, "_run_thread") as mock_run_thread,
+            ):
+                window._run_auto_renew()
+
+                job = mock_run_thread.call_args.args[0]
+                self.assertTrue(job(lambda _message: None))
+
+            self.assertEqual(calls, ["close", "renew"])
 
     def test_renew_selected_uses_selected_entry_account(self):
         window = MainWindow()
@@ -1145,6 +1169,30 @@ class UiSmokeTestCase(unittest.TestCase):
         job = mock_run_thread.call_args.args[0]
         self.assertTrue(job(lambda _message: None))
         self.assertEqual(mock_renew.call_args.args[0].name, "主账号")
+
+    def test_renew_selected_closes_group_runtime_before_renew(self):
+        window = MainWindow()
+        self.addCleanup(window.close)
+        window.accounts = [
+            AccountConfig(name="主账号", state_path="storage/shared.json", is_entry_account=True),
+        ]
+        window.refresh_table()
+        calls: list[str] = []
+
+        with (
+            patch("desktop_py.ui.main_window.close_all_group_runtimes", side_effect=lambda: calls.append("close")),
+            patch(
+                "desktop_py.ui.main_window.renew_account_state",
+                side_effect=lambda *_args: calls.append("renew") or True,
+            ),
+            patch.object(window, "_run_thread") as mock_run_thread,
+        ):
+            window.renew_selected()
+
+            job = mock_run_thread.call_args.args[0]
+            self.assertTrue(job(lambda _message: None))
+
+        self.assertEqual(calls, ["close", "renew"])
 
     def test_run_auto_renew_passes_headless_fetch_setting(self):
         with patch.dict(os.environ, {"QT_QPA_PLATFORM": "windows"}):

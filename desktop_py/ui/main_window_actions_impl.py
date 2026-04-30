@@ -405,7 +405,7 @@ def validate_selected(window, *, validate_account_state_fn) -> None:
     )
 
 
-def renew_selected(window, *, renew_account_state_fn) -> None:
+def renew_selected(window, *, renew_account_state_fn, close_all_group_runtimes_fn=None) -> None:
     account = window.selected_account()
     if not account:
         window._show_info("提示", "请先选择一个账号。")
@@ -413,13 +413,19 @@ def renew_selected(window, *, renew_account_state_fn) -> None:
     if not account.is_entry_account:
         window._show_info("提示", "导入账号不能登录续期，请选择主账号。")
         return
-    window._run_thread(
-        lambda log: renew_account_state_fn(
+
+    def job(log):
+        if callable(close_all_group_runtimes_fn):
+            close_all_group_runtimes_fn()
+        return renew_account_state_fn(
             account,
             log,
             window.settings.browser_profile_dir,
             window.settings.headless_fetch,
-        ),
+        )
+
+    window._run_thread(
+        job,
         on_success=lambda ok: window._mark_auto_renew_result(account, bool(ok)),
     )
 
@@ -532,7 +538,7 @@ def handle_auto_renew_timeout(window) -> None:
     window._run_auto_renew()
 
 
-def run_auto_renew(window, *, renew_account_state_fn) -> None:
+def run_auto_renew(window, *, renew_account_state_fn, close_all_group_runtimes_fn=None) -> None:
     if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
         return
     if window._threads:
@@ -542,13 +548,19 @@ def run_auto_renew(window, *, renew_account_state_fn) -> None:
     if account is None:
         window.append_log("自动续期已跳过：未配置主账号。")
         return
-    window._run_thread(
-        lambda log: renew_account_state_fn(
+
+    def job(log):
+        if callable(close_all_group_runtimes_fn):
+            close_all_group_runtimes_fn()
+        return renew_account_state_fn(
             account,
             log,
             window.settings.browser_profile_dir,
             window.settings.headless_fetch,
-        ),
+        )
+
+    window._run_thread(
+        job,
         on_success=lambda ok: window._mark_auto_renew_result(account, bool(ok)),
         update_status=False,
     )
